@@ -1,0 +1,20 @@
+# Docker Images to Scan
+# One image per line, comments start with #
+# Format: image:tag or registry/image:tag
+
+# Official images
+nginx:latest
+nginx:1.25-alpine
+ubuntu:22.04
+python:3.11-slim
+node:20-alpine
+
+# Application images (uncomment to scan)
+# postgres:15
+# redis:7-alpine
+# mysql:8.0
+
+# Private registry examples
+# myregistry.azurecr.io/myapp:v1.2.3
+# gcr.io/my-project/myapp:latest
+# docker.io/myorg/myapp:stable

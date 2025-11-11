@@ -1,0 +1,79 @@
+name: YAVS Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # For uploading SARIF
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install YAVS
+        run: |
+          pip install yavs
+
+      - name: Run security scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          yavs scan . \
+            --all \
+            --output-dir scan-results \
+            --sarif scan-results/results.sarif \
+            --fail-on HIGH,CRITICAL \
+            --ignore "node_modules/" \
+            --ignore "vendor/" \
+            --ignore "*.test.js" \
+            --ai-fix \
+            --ai-summarize
+
+      - name: Upload SARIF results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: scan-results/results.sarif
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: yavs-scan-results
+          path: scan-results/
+          retention-days: 30
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          yavs report scan-results/yavs-results.json \
+            --output scan-results/security-report.html
+
+      - name: Comment PR with summary
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('scan-results/summary.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔒 YAVS Security Scan Results\n\n${summary}`
+            });

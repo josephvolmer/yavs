@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yavs.dev/schema/summary-output.json",
+  "title": "YAVS AI Summary Output Schema",
+  "description": "Schema for YAVS AI-generated summary and triage output (from 'yavs summarize' command)",
+  "type": "object",
+  "required": ["build_cycle", "findings_count"],
+  "properties": {
+    "build_cycle": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the summary was generated (UTC with Z suffix)",
+      "example": "2025-11-09T05:30:00.123456Z"
+    },
+    "findings_count": {
+      "type": "integer",
+      "description": "Total number of findings that were analyzed",
+      "minimum": 0,
+      "example": 97
+    },
+    "executive_summary": {
+      "type": "string",
+      "description": "AI-generated executive summary in Markdown format (present when summarize feature is enabled)",
+      "example": "## Executive Summary\n\nYour application has 97 security findings..."
+    },
+    "ai_provider": {
+      "type": "string",
+      "description": "AI provider used to generate the summary (present when executive_summary is present)",
+      "enum": ["anthropic", "openai"],
+      "example": "anthropic"
+    },
+    "ai_model": {
+      "type": "string",
+      "description": "AI model used to generate the summary (present when executive_summary is present)",
+      "example": "claude-sonnet-4-5-20250929"
+    },
+    "triage": {
+      "type": "object",
+      "description": "Triage analysis results (present when --triage flag is used)",
+      "required": ["clusters", "cluster_count", "total_findings", "ai_analysis"],
+      "properties": {
+        "clusters": {
+          "type": "array",
+          "description": "Findings grouped into clusters based on similarity",
+          "items": {
+            "$ref": "#/definitions/Cluster"
+          }
+        },
+        "cluster_count": {
+          "type": "integer",
+          "description": "Number of clusters identified",
+          "minimum": 0,
+          "example": 5
+        },
+        "total_findings": {
+          "type": "integer",
+          "description": "Total number of findings analyzed in triage",
+          "minimum": 0,
+          "example": 97
+        },
+        "ai_analysis": {
+          "type": "string",
+          "description": "AI-generated triage analysis in Markdown format",
+          "example": "## Triage Analysis\n\n### High Priority Clusters...\n"
+        },
+        "ai_provider": {
+          "type": "string",
+          "description": "AI provider used for triage",
+          "enum": ["anthropic", "openai"],
+          "example": "anthropic"
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used for triage",
+          "example": "claude-sonnet-4-5-20250929"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Cluster": {
+      "type": "object",
+      "description": "A cluster of similar findings grouped by the triage engine",
+      "required": ["name", "count", "findings"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Descriptive name for the cluster",
+          "example": "Dependency Vulnerabilities - Log4j"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of findings in this cluster",
+          "minimum": 1,
+          "example": 3
+        },
+        "severity": {
+          "type": "string",
+          "description": "Representative severity for the cluster",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"],
+          "example": "CRITICAL"
+        },
+        "findings": {
+          "type": "array",
+          "description": "Array of finding indices that belong to this cluster",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "example": [0, 5, 12]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "build_cycle": "2025-11-09T05:30:00.123456Z",
+      "findings_count": 97,
+      "executive_summary": "## Executive Summary\n\nYour application has **97 security findings** across multiple categories:\n\n- **Critical (10)**: Immediate attention required, including Log4j RCE vulnerabilities\n- **High (25)**: Missing security controls and outdated dependencies\n- **Medium (40)**: Configuration issues and code quality concerns\n- **Low (20)**: Minor issues and improvements\n\n### Key Recommendations\n\n1. **Upgrade Log4j immediately** to version 2.17.1 or later\n2. **Enable CSRF protection** in Express middleware\n3. **Update Django** to patched version 1.11.23+\n4. **Configure Kubernetes security contexts** for all deployments\n\nTotal estimated remediation time: 2-3 days",
+      "ai_provider": "anthropic",
+      "ai_model": "claude-sonnet-4-5-20250929",
+      "triage": {
+        "clusters": [
+          {
+            "name": "Critical Dependency Vulnerabilities",
+            "count": 10,
+            "severity": "CRITICAL",
+            "findings": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+          },
+          {
+            "name": "Missing Security Controls",
+            "count": 15,
+            "severity": "HIGH",
+            "findings": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+          },
+          {
+            "name": "Kubernetes Configuration Issues",
+            "count": 20,
+            "severity": "MEDIUM",
+            "findings": [25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]
+          }
+        ],
+        "cluster_count": 3,
+        "total_findings": 97,
+        "ai_analysis": "## Triage Analysis\n\n### Priority 1: Critical Dependency Vulnerabilities (10 findings)\n\n**Impact**: Remote code execution, data breach\n**Effort**: 4 hours\n**Action**: Update all vulnerable dependencies immediately\n\nTop vulnerabilities:\n- CVE-2021-44228 (Log4Shell): Update to log4j 2.17.1+\n- CVE-2019-14234 (Django SQL Injection): Update to Django 1.11.23+\n\n### Priority 2: Missing Security Controls (15 findings)\n\n**Impact**: CSRF attacks, XSS, injection vulnerabilities\n**Effort**: 1 day\n**Action**: Implement missing middleware and input validation\n\n### Priority 3: Kubernetes Configuration (20 findings)\n\n**Impact**: Container escape, privilege escalation\n**Effort**: 2 days\n**Action**: Apply security contexts and resource limits",
+        "ai_provider": "anthropic",
+        "ai_model": "claude-sonnet-4-5-20250929"
+      }
+    }
+  ]
+}

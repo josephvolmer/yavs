@@ -1,0 +1,266 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yavs.dev/schema/flat-output.json",
+  "title": "YAVS Flat Output Schema",
+  "description": "Schema for YAVS (Yet Another Vulnerability Scanner) flat JSON output format with metadata wrapper",
+  "type": "object",
+  "required": ["build_cycle", "project", "data"],
+  "properties": {
+    "build_cycle": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the scan was performed (UTC with Z suffix)",
+      "example": "2025-11-09T03:42:28.873694Z"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project name, typically derived from the directory name or git repository",
+      "example": "my-application"
+    },
+    "commit_hash": {
+      "type": ["string", "null"],
+      "description": "Git commit hash of the scanned code (null if not a git repository or git not available)",
+      "pattern": "^[a-f0-9]{40}$",
+      "example": "abc123def456789012345678901234567890abcd"
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "description": "Git branch name of the scanned code (null if not a git repository or git not available)",
+      "example": "main"
+    },
+    "sbom": {
+      "type": ["object", "null"],
+      "description": "Software Bill of Materials metadata (present when SBOM generation is enabled, null otherwise)",
+      "required": ["format", "location", "tool"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "description": "SBOM format specification",
+          "enum": ["CYCLONEDX", "SPDX"],
+          "example": "CYCLONEDX"
+        },
+        "location": {
+          "type": "string",
+          "description": "Absolute file path to the generated SBOM file",
+          "example": "/path/to/artifacts/sbom.json"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "description": "Size of the SBOM file in bytes",
+          "minimum": 0,
+          "example": 2972
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool used to generate the SBOM",
+          "example": "trivy"
+        }
+      }
+    },
+    "data": {
+      "type": "array",
+      "description": "Array of all findings in flat format",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "ai_summary": {
+      "type": "object",
+      "description": "AI-generated summary and triage data (present when 'yavs summarize --enrich' is used)",
+      "required": ["build_cycle", "findings_count"],
+      "properties": {
+        "build_cycle": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when the AI summary was generated",
+          "example": "2025-11-09T05:30:00.123456Z"
+        },
+        "findings_count": {
+          "type": "integer",
+          "description": "Number of findings analyzed",
+          "minimum": 0
+        },
+        "executive_summary": {
+          "type": "string",
+          "description": "AI-generated executive summary (Markdown format)"
+        },
+        "ai_provider": {
+          "type": "string",
+          "enum": ["anthropic", "openai"],
+          "description": "AI provider used for summary generation"
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used for summary generation"
+        },
+        "triage": {
+          "type": "object",
+          "description": "Triage analysis with clustered findings",
+          "properties": {
+            "clusters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "count": {"type": "integer"},
+                  "severity": {"type": "string"},
+                  "findings": {
+                    "type": "array",
+                    "items": {"type": "integer"}
+                  }
+                }
+              }
+            },
+            "cluster_count": {"type": "integer"},
+            "total_findings": {"type": "integer"},
+            "ai_analysis": {"type": "string"},
+            "ai_provider": {"type": "string"},
+            "ai_model": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Finding": {
+      "type": "object",
+      "description": "A single vulnerability or security finding",
+      "required": ["tool", "category", "severity", "file", "message", "rule_id"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Scanner tool that detected this finding",
+          "example": "trivy"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the finding",
+          "enum": ["dependency", "sast", "secret", "license", "config", "compliance"],
+          "example": "dependency"
+        },
+        "severity": {
+          "type": "string",
+          "description": "Severity level of the finding",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"],
+          "example": "HIGH"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path where the finding was detected",
+          "example": "requirements.txt"
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "description": "Line number in the file (null if not applicable)",
+          "minimum": 1,
+          "example": 42
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable description of the finding",
+          "example": "Django: SQL injection possibility in JSONField"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Rule or vulnerability identifier",
+          "example": "CVE-2019-14234"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the vulnerability or issue"
+        },
+        "package": {
+          "type": "string",
+          "description": "Package name (for dependency findings)",
+          "example": "django"
+        },
+        "version": {
+          "type": "string",
+          "description": "Installed/current package version (for dependency findings)",
+          "example": "1.11.0"
+        },
+        "fixed_version": {
+          "type": "string",
+          "description": "Version that fixes the vulnerability (for dependency findings)",
+          "example": "1.11.23, 2.1.11, 2.2.4"
+        },
+        "source": {
+          "type": "string",
+          "description": "Source of the finding (filesystem path or Docker image)",
+          "example": "filesystem:/path/to/project"
+        },
+        "source_type": {
+          "type": "string",
+          "description": "Type of source",
+          "enum": ["filesystem", "image"],
+          "example": "filesystem"
+        },
+        "ai_fix": {
+          "type": "string",
+          "description": "AI-generated remediation guidance (present when AI features are enabled and fix was generated)"
+        },
+        "ai_provider": {
+          "type": "string",
+          "description": "AI provider used to generate the fix (present when ai_fix is present)",
+          "enum": ["anthropic", "openai"]
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used to generate the fix (present when ai_fix is present)",
+          "example": "claude-sonnet-4-5-20250929"
+        },
+        "ai_summary": {
+          "type": "string",
+          "description": "AI-generated summary for this specific finding (present when AI summarization is enabled)"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "build_cycle": "2025-11-09T03:42:28.873694Z",
+      "project": "my-web-application",
+      "commit_hash": "abc123def456789012345678901234567890abcd",
+      "branch": "main",
+      "sbom": {
+        "format": "CYCLONEDX",
+        "location": "/path/to/artifacts/sbom.json",
+        "size_bytes": 2972,
+        "tool": "trivy"
+      },
+      "data": [
+        {
+          "tool": "trivy",
+          "category": "dependency",
+          "severity": "CRITICAL",
+          "file": "requirements.txt",
+          "line": null,
+          "message": "Django: SQL injection possibility in JSONField",
+          "rule_id": "CVE-2019-14234",
+          "description": "An issue was discovered in Django 1.11.x before 1.11.23...",
+          "package": "django",
+          "version": "1.11.0",
+          "fixed_version": "1.11.23, 2.1.11, 2.2.4",
+          "source": "filesystem:/path/to/project",
+          "source_type": "filesystem",
+          "ai_fix": "Update Django to version 1.11.23 or later:\n\n```bash\npip install 'django>=1.11.23'\n```",
+          "ai_provider": "anthropic",
+          "ai_model": "claude-sonnet-4-5-20250929"
+        },
+        {
+          "tool": "semgrep",
+          "category": "sast",
+          "severity": "HIGH",
+          "file": "src/app.js",
+          "line": 25,
+          "message": "Missing CSRF protection middleware",
+          "rule_id": "javascript.express.security.audit.express-check-csurf-middleware-usage",
+          "description": "Express application is missing CSRF protection",
+          "source": "filesystem:/path/to/project",
+          "source_type": "filesystem"
+        }
+      ]
+    }
+  ]
+}

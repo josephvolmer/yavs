@@ -1,0 +1,398 @@
+name: Comprehensive Security Analysis
+
+# Full-featured workflow demonstrating all YAVS capabilities
+# Runs on-demand or weekly for thorough security review
+
+on:
+  workflow_dispatch:
+    inputs:
+      notify_slack:
+        description: 'Send Slack notification'
+        required: false
+        type: boolean
+        default: false
+      create_issue:
+        description: 'Create GitHub issue for findings'
+        required: false
+        type: boolean
+        default: true
+  # Automatic triggers disabled - manual trigger only
+  # schedule:
+  #   # Run every Monday at 9 AM UTC
+  #   - cron: '0 9 * * 1'
+
+jobs:
+  comprehensive-scan:
+    name: Full Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install YAVS from source
+        run: |
+          pip install -e .
+
+      - name: Install all security scanners
+        run: |
+          # Trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+          # Semgrep, Bandit, and Checkov
+          pip install semgrep bandit checkov
+
+      - name: Create custom YAVS configuration
+        run: |
+          cat > custom-config.yaml << EOF
+          scanners:
+            trivy:
+              enabled: true
+              flags: ""
+              timeout: 600
+            semgrep:
+              enabled: true
+              flags: "--config=auto --metrics=off"
+              timeout: 600
+            bandit:
+              enabled: true
+              flags: "-f json"
+              timeout: 600
+            checkov:
+              enabled: true
+              flags: "--quiet --compact"
+              timeout: 600
+
+          output:
+            json: "comprehensive-results.json"
+            sarif: "comprehensive-results.sarif"
+
+          ai:
+            enabled: true
+            provider: "anthropic"
+            model: "claude-sonnet-4-5-20250929"
+            features:
+              summarize: true
+              triage: true
+              fix_suggestions: true
+
+          logging:
+            level: "INFO"
+          EOF
+
+      - name: Run comprehensive security scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "🔍 Starting comprehensive security scan..."
+          yavs scan --all \
+            --continue-on-error \
+            --flat \
+            --config custom-config.yaml \
+            --json comprehensive-results.json \
+            --sarif comprehensive-results.sarif
+        continue-on-error: true
+
+      - name: Validate SARIF output
+        if: always()
+        run: |
+          if [ -f comprehensive-results.sarif ]; then
+            pip install sarif-tools
+            sarif info comprehensive-results.sarif
+          else
+            echo "⚠️ SARIF file not found, skipping validation"
+          fi
+
+      - name: Generate AI-powered security report
+        if: always()
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ ! -f comprehensive-results.json ]; then
+            echo "⚠️ Scan results not found, creating placeholder report"
+            echo "# Security Analysis" > security-analysis.md
+            echo "Scan failed to complete. No results available." >> security-analysis.md
+          elif [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            echo "🤖 Generating AI-powered analysis..."
+            yavs summarize comprehensive-results.json > security-analysis.md
+          else
+            echo "⚠️ Skipping AI analysis (no API keys configured)"
+            echo "# Security Analysis" > security-analysis.md
+            echo "AI analysis requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be configured" >> security-analysis.md
+          fi
+
+      - name: Generate detailed statistics
+        id: stats
+        if: always()
+        run: |
+          if [ ! -f comprehensive-results.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            TOTAL=0
+            CRITICAL=0
+            HIGH=0
+            MEDIUM=0
+            LOW=0
+            DEPENDENCY=0
+            SAST=0
+            COMPLIANCE=0
+            SECRET=0
+            TRIVY=0
+            SEMGREP=0
+            CHECKOV=0
+          else
+            # Calculate comprehensive statistics (flat format has findings in .data array)
+            TOTAL=$(jq '.data | length' comprehensive-results.json)
+            CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' comprehensive-results.json)
+            HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' comprehensive-results.json)
+            MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' comprehensive-results.json)
+            LOW=$(jq '[.data[] | select(.severity=="LOW")] | length' comprehensive-results.json)
+
+            # By category
+            DEPENDENCY=$(jq '[.data[] | select(.category=="dependency")] | length' comprehensive-results.json)
+            SAST=$(jq '[.data[] | select(.category=="sast")] | length' comprehensive-results.json)
+            COMPLIANCE=$(jq '[.data[] | select(.category=="compliance")] | length' comprehensive-results.json)
+            SECRET=$(jq '[.data[] | select(.category=="secret")] | length' comprehensive-results.json)
+
+            # By tool
+            TRIVY=$(jq '[.data[] | select(.tool=="trivy")] | length' comprehensive-results.json)
+            SEMGREP=$(jq '[.data[] | select(.tool=="semgrep")] | length' comprehensive-results.json)
+            CHECKOV=$(jq '[.data[] | select(.tool=="checkov")] | length' comprehensive-results.json)
+          fi
+
+          # Output to GITHUB_OUTPUT
+          {
+            echo "total=$TOTAL"
+            echo "critical=$CRITICAL"
+            echo "high=$HIGH"
+            echo "medium=$MEDIUM"
+            echo "low=$LOW"
+            echo "dependency=$DEPENDENCY"
+            echo "sast=$SAST"
+            echo "compliance=$COMPLIANCE"
+            echo "secret=$SECRET"
+            echo "trivy=$TRIVY"
+            echo "semgrep=$SEMGREP"
+            echo "checkov=$CHECKOV"
+          } >> $GITHUB_OUTPUT
+
+          # Create summary report
+          cat > summary-stats.md << EOF
+          # Comprehensive Security Scan Results
+
+          **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+
+          ## Overview
+
+          Total findings: **$TOTAL**
+
+          ### By Severity
+          - 🔴 Critical: **$CRITICAL**
+          - 🟠 High: **$HIGH**
+          - 🟡 Medium: **$MEDIUM**
+          - 🔵 Low: **$LOW**
+
+          ### By Category
+          - 📦 Dependencies: **$DEPENDENCY**
+          - 🔍 SAST: **$SAST**
+          - ⚙️ Compliance: **$COMPLIANCE**
+          - 🔐 Secrets: **$SECRET**
+
+          ### By Scanner
+          - Trivy: **$TRIVY**
+          - Semgrep: **$SEMGREP**
+          - Checkov: **$CHECKOV**
+          EOF
+
+          cat summary-stats.md
+
+      - name: Upload to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: comprehensive-results.sarif
+          category: yavs-comprehensive-scan
+
+      - name: Create comprehensive report package
+        if: always()
+        run: |
+          mkdir -p security-reports
+
+          # Copy all reports (only if they exist)
+          [ -f comprehensive-results.json ] && cp comprehensive-results.json security-reports/ || echo "No JSON results"
+          [ -f comprehensive-results.sarif ] && cp comprehensive-results.sarif security-reports/ || echo "No SARIF results"
+          [ -f summary-stats.md ] && cp summary-stats.md security-reports/ || echo "No summary stats"
+          [ -f security-analysis.md ] && cp security-analysis.md security-reports/ || echo "No security analysis"
+
+          # Create top 10 critical issues report (flat format uses .data array)
+          if [ -f comprehensive-results.json ]; then
+            jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \
+              comprehensive-results.json > security-reports/top-10-critical.json
+
+            # Create package-specific report
+            jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+              comprehensive-results.json > security-reports/packages-report.json
+          else
+            echo "[]" > security-reports/top-10-critical.json
+            echo "[]" > security-reports/packages-report.json
+          fi
+
+          # Create index
+          cat > security-reports/INDEX.md << EOF
+          # Security Report Package
+
+          This package contains comprehensive security scan results.
+
+          ## Contents
+
+          - \`comprehensive-results.json\` - Full scan results in normalized JSON format
+          - \`comprehensive-results.sarif\` - SARIF 2.1.0 compliant output
+          - \`summary-stats.md\` - Statistical summary
+          - \`security-analysis.md\` - AI-powered analysis and recommendations
+          - \`top-10-critical.json\` - Top 10 critical/high severity findings
+          - \`packages-report.json\` - Package-grouped vulnerability report
+
+          ## Viewing Results
+
+          - Upload SARIF file to GitHub Security tab
+          - View JSON files with \`jq\` for filtering
+          - Read markdown files for executive summary
+
+          ## Generated
+          - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - Workflow: ${{ github.workflow }}
+          - Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+
+      - name: Upload comprehensive report package
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-security-report-${{ github.run_number }}
+          path: security-reports/
+          retention-days: 90
+
+      - name: Create issue for findings
+        if: |
+          always() &&
+          (inputs.create_issue == true || github.event_name == 'schedule') &&
+          (steps.stats.outputs.critical > 0 || steps.stats.outputs.high > 0)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const stats = {
+              total: '${{ steps.stats.outputs.total }}',
+              critical: '${{ steps.stats.outputs.critical }}',
+              high: '${{ steps.stats.outputs.high }}',
+              medium: '${{ steps.stats.outputs.medium }}'
+            };
+
+            const analysis = fs.readFileSync('security-analysis.md', 'utf8');
+            const summary = fs.readFileSync('summary-stats.md', 'utf8');
+
+            const title = `🔒 Weekly Security Review: ${stats.critical} Critical, ${stats.high} High Findings`;
+
+            const body = `${summary}
+
+            ## AI-Powered Analysis
+
+            ${analysis}
+
+            ## Actions Required
+
+            1. Review all critical and high severity findings
+            2. Prioritize remediation based on AI recommendations
+            3. Update dependencies with known vulnerabilities
+            4. Address any exposed secrets immediately
+
+            ## Resources
+
+            - [Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Security Tab](https://github.com/${{ github.repository }}/security/code-scanning)
+
+            ---
+            *Automated weekly security scan • Generated by YAVS*
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'weekly-scan', 'automated']
+            });
+
+      - name: Send Slack notification
+        if: |
+          always() &&
+          inputs.notify_slack == true &&
+          env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d '{
+            "text": "🔒 Weekly Security Scan Complete",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Security Scan Results"}
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {"type": "mrkdwn", "text": "*Total Findings:*\n${{ steps.stats.outputs.total }}"},
+                  {"type": "mrkdwn", "text": "*Critical:*\n${{ steps.stats.outputs.critical }}"},
+                  {"type": "mrkdwn", "text": "*High:*\n${{ steps.stats.outputs.high }}"},
+                  {"type": "mrkdwn", "text": "*Medium:*\n${{ steps.stats.outputs.medium }}"}
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Full Report"},
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }'
+
+      - name: Post job summary
+        if: always()
+        run: |
+          if [ -f summary-stats.md ]; then
+            cat summary-stats.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "# Comprehensive Security Scan" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Scan failed to complete. Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Security Tab](https://github.com/${{ github.repository }}/security/code-scanning)" >> $GITHUB_STEP_SUMMARY

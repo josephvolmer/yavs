@@ -1,0 +1,5 @@
+# Intentionally vulnerable dependencies for testing
+requests==2.19.0  # CVE-2018-18074
+flask==0.12.2     # Multiple CVEs
+django==1.11.0    # CVE-2018-14574
+pyyaml==3.12      # CVE-2017-18342

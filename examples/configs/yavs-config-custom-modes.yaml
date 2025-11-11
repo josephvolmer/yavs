@@ -1,0 +1,92 @@
+# Custom Mode Configuration Examples
+# Demonstrates fine-grained control over each scan mode
+
+scan:
+  directories:
+    - "."
+
+  ignore_paths:
+    - "node_modules/"
+    - "vendor/"
+    - ".venv/"
+    - "__pycache__/"
+    - ".git/"
+    - "test/"  # Ignore test directories
+
+metadata:
+  project: "my-awesome-app"
+  branch: null
+  commit_hash: null
+
+scanners:
+  trivy:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+  semgrep:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+  bandit:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+  checkov:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+# Mode-specific configuration with custom behaviors per mode
+modes:
+  # SBOM mode: Focus on production dependencies only
+  sbom:
+    scanners: [trivy]
+    trivy:
+      security_checks: [vuln, license]  # Skip secrets (checked in SAST)
+      flags: "--severity MEDIUM,HIGH,CRITICAL --scanners vuln,license"
+
+  # SAST mode: Comprehensive code analysis with secrets
+  sast:
+    scanners: [semgrep, bandit]  # Both SAST tools
+    semgrep:
+      flags: "--config=auto --config=p/security-audit --severity ERROR,WARNING"
+    bandit:
+      flags: "-ll"  # Medium and high severity only
+
+  # Compliance mode: Infrastructure and config checks
+  compliance:
+    scanners: [checkov, trivy]
+    trivy:
+      security_checks: [config, secret]  # Config checks + secrets in IaC
+      flags: "--severity HIGH,CRITICAL"
+    checkov:
+      flags: "--framework terraform kubernetes docker --quiet"
+
+  # All mode: Custom combination for complete scan
+  all:
+    # Explicit scanner list (not inherit)
+    scanners: [trivy, semgrep, bandit, checkov]
+    trivy:
+      security_checks: [vuln, secret, license, config]
+      # No severity filter in all mode
+
+output:
+  directory: "scan-results"
+  json: "results.json"
+  sarif: "results.sarif"
+  structured: true
+
+ai:
+  enabled: true
+  features:
+    fix_suggestions: true
+    summarize: true
+    triage: true
+  max_fixes_per_scan: 50
+
+logging:
+  level: "INFO"
+  format: "rich"

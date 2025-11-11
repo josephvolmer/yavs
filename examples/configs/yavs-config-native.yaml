@@ -1,0 +1,99 @@
+# Test Configuration for Native Config Support
+# Tests all scanners with their native configuration files
+
+scan:
+  directories:
+    - "tests/fixtures/sample_project"
+
+  ignore_paths:
+    - "__pycache__/"
+    - ".git/"
+
+metadata:
+  project: "test-native-configs"
+  branch: "main"
+  commit_hash: null
+
+scanners:
+  # Trivy with native config
+  trivy:
+    enabled: true
+    timeout: 300
+    flags: ""
+    native_config: "config/examples/trivy.yaml"
+
+  # Semgrep with native config
+  semgrep:
+    enabled: true
+    timeout: 300
+    flags: ""
+    native_config: "config/examples/.semgrep.yml"
+
+  # Bandit with native config
+  bandit:
+    enabled: true
+    timeout: 300
+    flags: ""
+    native_config: "config/examples/.bandit"
+
+  # BinSkim with native config
+  binskim:
+    enabled: false  # Requires .NET SDK
+    timeout: 300
+    flags: ""
+    native_config: "config/examples/.gdnconfig"
+
+  # Checkov with native config
+  checkov:
+    enabled: true
+    timeout: 300
+    flags: ""
+    native_config: "config/examples/.checkov.yaml"
+
+# Mode-specific configuration
+modes:
+  sbom:
+    scanners: [trivy]
+    trivy:
+      security_checks: [vuln, secret, license]
+
+  sast:
+    scanners: [semgrep, bandit]
+
+  compliance:
+    scanners: [checkov, trivy]
+    trivy:
+      security_checks: [config]
+
+  all:
+    inherit: true
+
+output:
+  directory: "artifacts/test-native-configs"
+  json: "yavs-results.json"
+  sarif: "yavs-results.sarif"
+  structured: true
+  per_tool_files: false
+
+ai:
+  enabled: false  # Disable AI for faster testing
+
+severity_mapping:
+  ERROR: "HIGH"
+  WARNING: "MEDIUM"
+  error: "HIGH"
+  warning: "MEDIUM"
+  note: "LOW"
+  none: "INFO"
+  CRITICAL: "CRITICAL"
+  HIGH: "HIGH"
+  MEDIUM: "MEDIUM"
+  LOW: "LOW"
+  INFO: "INFO"
+  UNKNOWN: "LOW"
+
+logging:
+  level: "DEBUG"  # Enable debug logging to see native config messages
+  format: "rich"
+  file:
+    enabled: false

@@ -1,0 +1,63 @@
+# Trivy Native Configuration Example - Tuned for YAVS Test Fixtures
+# Place this file at the path specified in config.yaml: scanners.trivy.native_config
+# Documentation: https://aquasecurity.github.io/trivy/latest/docs/configuration/
+
+# Severity levels to report - ALL LEVELS for comprehensive testing
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  - LOW
+  - UNKNOWN
+
+# Security checks - YAVS manages this via CLI, but can be extended here
+# YAVS baseline: vuln,secret,license
+# Uncomment to override:
+# security-checks:
+#   - vuln
+#   - secret
+#   - config
+#   - license
+
+# Output format - managed by YAVS (always JSON)
+# format: json
+
+# Vulnerability database settings
+db:
+  skip-update: false  # Always use latest CVE data
+  no-progress: true   # Clean output for CI/CD
+
+# Secret scanning - enable all rules to catch hardcoded credentials in test fixtures
+# Test fixtures contain: API_KEY, PASSWORD, DB_PASSWORD
+secret:
+  config: ""  # Use default secret patterns
+
+# Vulnerability filters
+vulnerability:
+  type:
+    - os       # OS package vulnerabilities
+    - library  # Language-specific library vulnerabilities
+
+# Report unfixed vulnerabilities (important for complete testing)
+ignore-unfixed: false
+
+# Skip files and directories - minimal skips for test fixtures
+skip-dirs:
+  - .git
+  - __pycache__
+  # DO NOT skip node_modules, vendor, etc. for testing (we want to catch everything)
+
+# Exit code (0 = success even if vulns found)
+exit-code: 0
+
+# Timeout settings
+timeout: 5m
+
+# Cache directory
+cache-dir: ~/.cache/trivy
+
+# Offline mode (use local DB only)
+offline-scan: false
+
+# Light mode (faster but less accurate) - disabled for thorough testing
+light: false

@@ -1,0 +1,9 @@
+# Exclude template files with embedded base64 images from language statistics
+src/yavs/templates/*.jinja linguist-generated=true
+
+# Mark example and documentation files
+examples/** linguist-documentation
+docs/** linguist-documentation
+
+# Ensure Python is detected correctly
+*.py linguist-language=Python

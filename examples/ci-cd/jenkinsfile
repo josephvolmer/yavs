@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+
+    environment {
+        ANTHROPIC_API_KEY = credentials('anthropic-api-key')
+        YAVS_OUTPUT_DIR = 'scan-results'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install yavs
+                '''
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    yavs scan . \\
+                        --all \\
+                        --output-dir ${YAVS_OUTPUT_DIR} \\
+                        --sarif ${YAVS_OUTPUT_DIR}/results.sarif \\
+                        --json ${YAVS_OUTPUT_DIR}/results.json \\
+                        --fail-on HIGH,CRITICAL \\
+                        --ignore "node_modules/" \\
+                        --ignore "vendor/" \\
+                        --ai-summarize \\
+                        --ai-fix
+                '''
+            }
+        }
+
+        stage('Generate Report') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    yavs report ${YAVS_OUTPUT_DIR}/results.json \\
+                        --output ${YAVS_OUTPUT_DIR}/security-report.html
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: "${YAVS_OUTPUT_DIR}/**",
+                           allowEmptyArchive: true
+
+            publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: env.YAVS_OUTPUT_DIR,
+                reportFiles: 'security-report.html',
+                reportName: 'YAVS Security Report'
+            ])
+        }
+
+        failure {
+            emailext(
+                subject: "Security Scan Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    Security scan failed for ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
+
+                    Check the security report at: ${env.BUILD_URL}YAVS_Security_Report/
+                """,
+                to: "${env.SECURITY_EMAIL}"
+            )
+        }
+    }
+}

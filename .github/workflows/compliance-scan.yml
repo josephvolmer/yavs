@@ -1,0 +1,60 @@
+name: Compliance Scan
+
+# Infrastructure and configuration compliance scanning
+# Scans IaC files, Dockerfiles, K8s manifests for misconfigurations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compliance-scan:
+    name: Compliance Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install YAVS and compliance scanners
+        run: |
+          pip install -e .
+          pip install checkov
+
+      - name: Run compliance scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          yavs scan --compliance \
+            --continue-on-error \
+            --flat \
+            --json compliance-results.json \
+            --sarif compliance-results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: compliance-results.sarif
+          category: yavs-compliance-scan
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compliance-scan-results
+          path: |
+            compliance-results.json
+            compliance-results.sarif
+          retention-days: 30

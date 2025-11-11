@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  labels:
+    app: vulnerable-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-app
+  template:
+    metadata:
+      labels:
+        app: vulnerable-app
+    spec:
+      containers:
+      - name: app
+        image: myapp:latest  # Security issue: using 'latest' tag
+        ports:
+        - containerPort: 8080
+        env:
+        # Security issue: hardcoded secrets in manifest
+        - name: API_KEY
+          value: "sk-1234567890abcdefghijklmnopqrstuvwxyz"
+        - name: DATABASE_PASSWORD
+          value: "admin123"
+        securityContext:
+          # Security issue: running as root
+          runAsUser: 0
+          # Security issue: privileged container
+          privileged: true
+          # Security issue: allowing privilege escalation
+          allowPrivilegeEscalation: true
+        resources:
+          # No resource limits defined (best practice issue)
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vulnerable-app-service
+spec:
+  type: LoadBalancer  # May expose service to internet
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: vulnerable-app

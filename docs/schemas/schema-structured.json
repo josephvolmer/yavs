@@ -1,0 +1,410 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yavs.dev/schema/structured-output.json",
+  "title": "YAVS Structured Output Schema",
+  "description": "Schema for YAVS (Yet Another Vulnerability Scanner) structured JSON output format, including optional AI-enhanced fields",
+  "type": "object",
+  "required": ["build_cycle", "project", "summary"],
+  "properties": {
+    "build_cycle": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the scan was performed (UTC with Z suffix)",
+      "example": "2025-11-09T03:42:28.873694Z"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project name, typically derived from the directory name or git repository",
+      "example": "my-application"
+    },
+    "commit_hash": {
+      "type": ["string", "null"],
+      "description": "Git commit hash of the scanned code (null if not a git repository or git not available)",
+      "pattern": "^[a-f0-9]{40}$",
+      "example": "abc123def456789012345678901234567890abcd"
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "description": "Git branch name of the scanned code (null if not a git repository or git not available)",
+      "example": "main"
+    },
+    "sbom": {
+      "type": "object",
+      "description": "Software Bill of Materials metadata (present when SBOM generation is enabled)",
+      "required": ["format", "location", "tool"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "description": "SBOM format specification",
+          "enum": ["CYCLONEDX", "SPDX"],
+          "example": "CYCLONEDX"
+        },
+        "location": {
+          "type": "string",
+          "description": "Absolute file path to the generated SBOM file",
+          "example": "/path/to/artifacts/sbom.json"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "description": "Size of the SBOM file in bytes",
+          "minimum": 0,
+          "example": 2972
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool used to generate the SBOM",
+          "example": "trivy"
+        }
+      }
+    },
+    "compliance": {
+      "type": "array",
+      "description": "Compliance violations organized by scanner tool. Includes CVEs, secrets, licenses, config issues, and IaC policy violations",
+      "items": {
+        "$ref": "#/definitions/ComplianceTool"
+      }
+    },
+    "sast": {
+      "type": "array",
+      "description": "Static Application Security Testing (SAST) findings organized by scanner tool",
+      "items": {
+        "$ref": "#/definitions/SASTTool"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Statistical summary of all findings",
+      "required": ["total_findings", "by_severity", "by_category"],
+      "properties": {
+        "total_findings": {
+          "type": "integer",
+          "description": "Total number of findings across all categories and severities",
+          "minimum": 0,
+          "example": 97
+        },
+        "by_severity": {
+          "type": "object",
+          "description": "Breakdown of findings by severity level",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "example": {
+            "CRITICAL": 10,
+            "HIGH": 25,
+            "MEDIUM": 40,
+            "LOW": 20,
+            "INFO": 2
+          }
+        },
+        "by_category": {
+          "type": "object",
+          "description": "Breakdown of findings by category type",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "example": {
+            "dependency": 50,
+            "sast": 20,
+            "config": 15,
+            "compliance": 12
+          }
+        }
+      }
+    },
+    "ai_summary": {
+      "type": "object",
+      "description": "AI-generated summary and triage data (present when 'yavs summarize --enrich' is used)",
+      "required": ["build_cycle", "findings_count"],
+      "properties": {
+        "build_cycle": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of when the AI summary was generated",
+          "example": "2025-11-09T05:30:00.123456Z"
+        },
+        "findings_count": {
+          "type": "integer",
+          "description": "Number of findings analyzed",
+          "minimum": 0
+        },
+        "executive_summary": {
+          "type": "string",
+          "description": "AI-generated executive summary (Markdown format)"
+        },
+        "ai_provider": {
+          "type": "string",
+          "enum": ["anthropic", "openai"],
+          "description": "AI provider used for summary generation"
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used for summary generation"
+        },
+        "triage": {
+          "type": "object",
+          "description": "Triage analysis with clustered findings",
+          "properties": {
+            "clusters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "count": {"type": "integer"},
+                  "severity": {"type": "string"},
+                  "findings": {
+                    "type": "array",
+                    "items": {"type": "integer"}
+                  }
+                }
+              }
+            },
+            "cluster_count": {"type": "integer"},
+            "total_findings": {"type": "integer"},
+            "ai_analysis": {"type": "string"},
+            "ai_provider": {"type": "string"},
+            "ai_model": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ComplianceTool": {
+      "type": "object",
+      "description": "Compliance violations from a specific scanner tool",
+      "required": ["tool", "violations"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Name of the scanner tool (title case)",
+          "example": "Trivy"
+        },
+        "violations": {
+          "type": "array",
+          "description": "List of compliance violations detected by this tool",
+          "items": {
+            "$ref": "#/definitions/Violation"
+          }
+        }
+      }
+    },
+    "Violation": {
+      "type": "object",
+      "description": "A single compliance violation (CVE, secret, license issue, config issue, or IaC policy violation)",
+      "required": ["severity", "rule_id", "description", "file"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Severity level of the violation",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"],
+          "example": "HIGH"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Rule or vulnerability identifier (e.g., CVE-2021-1234, CKV_AWS_1)",
+          "example": "CVE-2021-44228"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the violation",
+          "example": "Log4j Remote Code Execution vulnerability"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path where the violation was found",
+          "example": "pom.xml"
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "description": "Line number in the file where the violation occurs (null if not applicable)",
+          "minimum": 1,
+          "example": 42
+        },
+        "package": {
+          "type": "string",
+          "description": "Package name (present for dependency CVEs)",
+          "example": "org.apache.logging.log4j:log4j-core"
+        },
+        "version": {
+          "type": "string",
+          "description": "Installed/current version (present for dependency CVEs)",
+          "example": "2.14.0"
+        },
+        "fixed_version": {
+          "type": "string",
+          "description": "Version that fixes the vulnerability (present for dependency CVEs)",
+          "example": "2.17.1"
+        },
+        "vulnerability_id": {
+          "type": "string",
+          "description": "Vulnerability identifier, same as rule_id (present for dependency CVEs)",
+          "example": "CVE-2021-44228"
+        },
+        "ai_fix": {
+          "type": "string",
+          "description": "AI-generated remediation guidance (present when AI features are enabled and fix was generated)",
+          "example": "Update log4j-core dependency to version 2.17.1 or later:\n\n```xml\n<dependency>\n  <groupId>org.apache.logging.log4j</groupId>\n  <artifactId>log4j-core</artifactId>\n  <version>2.17.1</version>\n</dependency>\n```"
+        },
+        "ai_provider": {
+          "type": "string",
+          "description": "AI provider used to generate the fix (present when ai_fix is present)",
+          "enum": ["anthropic", "openai"],
+          "example": "anthropic"
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used to generate the fix (present when ai_fix is present)",
+          "example": "claude-sonnet-4-5-20250929"
+        }
+      }
+    },
+    "SASTTool": {
+      "type": "object",
+      "description": "SAST findings from a specific scanner tool",
+      "required": ["tool", "issues"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Name of the SAST scanner tool (title case)",
+          "example": "Semgrep"
+        },
+        "issues": {
+          "type": "array",
+          "description": "List of SAST issues detected by this tool",
+          "items": {
+            "$ref": "#/definitions/SASTIssue"
+          }
+        }
+      }
+    },
+    "SASTIssue": {
+      "type": "object",
+      "description": "A single SAST issue (code vulnerability or security anti-pattern)",
+      "required": ["severity", "rule_id", "description", "file"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Severity level of the issue",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"],
+          "example": "HIGH"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Rule identifier from the SAST tool",
+          "example": "javascript.express.security.audit.express-check-csurf-middleware-usage"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the issue",
+          "example": "Potential SQL injection vulnerability"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path where the issue was found",
+          "example": "src/controllers/user.js"
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "description": "Line number in the file where the issue occurs (null if not applicable)",
+          "minimum": 1,
+          "example": 156
+        },
+        "ai_fix": {
+          "type": "string",
+          "description": "AI-generated code fix or remediation guidance (present when AI features are enabled)"
+        },
+        "ai_provider": {
+          "type": "string",
+          "description": "AI provider used to generate the fix (present when ai_fix is present)",
+          "enum": ["anthropic", "openai"]
+        },
+        "ai_model": {
+          "type": "string",
+          "description": "AI model used to generate the fix (present when ai_fix is present)"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "build_cycle": "2025-11-09T03:42:28.873694Z",
+      "project": "my-web-application",
+      "commit_hash": "abc123def456789012345678901234567890abcd",
+      "branch": "main",
+      "sbom": {
+        "format": "CYCLONEDX",
+        "location": "/path/to/artifacts/sbom.json",
+        "size_bytes": 2972,
+        "tool": "trivy"
+      },
+      "compliance": [
+        {
+          "tool": "Trivy",
+          "violations": [
+            {
+              "severity": "CRITICAL",
+              "rule_id": "CVE-2021-44228",
+              "description": "Apache Log4j2 Remote Code Execution (RCE) vulnerability",
+              "file": "pom.xml",
+              "line": null,
+              "package": "org.apache.logging.log4j:log4j-core",
+              "version": "2.14.0",
+              "fixed_version": "2.17.1",
+              "vulnerability_id": "CVE-2021-44228",
+              "ai_fix": "Update log4j-core to version 2.17.1 or later in pom.xml",
+              "ai_provider": "anthropic",
+              "ai_model": "claude-sonnet-4-5-20250929"
+            }
+          ]
+        },
+        {
+          "tool": "Checkov",
+          "violations": [
+            {
+              "severity": "HIGH",
+              "rule_id": "CKV_K8S_8",
+              "description": "Liveness Probe Should Be Configured",
+              "file": "k8s/deployment.yaml",
+              "line": 15
+            }
+          ]
+        }
+      ],
+      "sast": [
+        {
+          "tool": "Semgrep",
+          "issues": [
+            {
+              "severity": "HIGH",
+              "rule_id": "javascript.express.security.audit.express-check-csurf-middleware-usage",
+              "description": "Missing CSRF protection middleware",
+              "file": "src/app.js",
+              "line": 25,
+              "ai_fix": "Add CSRF protection middleware:\n\nconst csrf = require('csurf');\napp.use(csrf({ cookie: true }));",
+              "ai_provider": "anthropic"
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "total_findings": 97,
+        "by_severity": {
+          "CRITICAL": 10,
+          "HIGH": 25,
+          "MEDIUM": 40,
+          "LOW": 20,
+          "INFO": 2
+        },
+        "by_category": {
+          "dependency": 50,
+          "sast": 20,
+          "config": 15,
+          "compliance": 12
+        }
+      }
+    }
+  ]
+}

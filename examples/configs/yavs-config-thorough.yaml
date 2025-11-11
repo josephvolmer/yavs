@@ -1,0 +1,95 @@
+# Thorough Security Scan Configuration
+# Maximum coverage - all scanners, all severity levels, AI-powered analysis
+
+scan:
+  directories:
+    - "."
+
+  ignore_paths:
+    - "node_modules/"
+    - "vendor/"
+    - ".venv/"
+    - "venv/"
+    - "__pycache__/"
+    - ".git/"
+
+metadata:
+  project: null
+  branch: null
+  commit_hash: null
+
+scanners:
+  trivy:
+    enabled: true
+    timeout: 600  # Longer timeout for thorough scan
+    flags: ""
+
+  semgrep:
+    enabled: true
+    timeout: 600
+    flags: "--config=auto --metrics=off"
+
+  bandit:
+    enabled: true
+    timeout: 600
+    flags: "-f json"
+
+  binskim:
+    enabled: true
+    timeout: 600
+    flags: ""
+
+  checkov:
+    enabled: true
+    timeout: 600
+    flags: "--quiet --compact"
+
+# Mode-specific configuration: Comprehensive coverage
+modes:
+  # SBOM mode: Everything including LOW severity
+  sbom:
+    scanners: [trivy]
+    trivy:
+      security_checks: [vuln, secret, license]
+      # No severity filter - include all findings
+
+  # SAST mode: All SAST tools
+  sast:
+    scanners: [semgrep, bandit, binskim]
+    semgrep:
+      flags: "--config=auto --config=p/owasp-top-10 --config=p/security-audit"
+    # No severity filters on bandit or binskim
+
+  # Compliance mode: Both Checkov and Trivy config checks
+  compliance:
+    scanners: [checkov, trivy]
+    trivy:
+      security_checks: [config]
+
+  # All mode: Everything enabled
+  all:
+    inherit: true  # Inherits from all modes above
+
+output:
+  directory: "."
+  json: "thorough-scan-results.json"
+  sarif: "thorough-scan-results.sarif"
+  structured: true  # Organized by category
+  per_tool_files: true  # Generate per-tool files
+
+ai:
+  enabled: true
+  provider: null  # Auto-detect from API keys
+  model: null  # Use provider default
+  max_tokens: 4096
+  temperature: 0.0
+  features:
+    fix_suggestions: true
+    summarize: true
+    triage: true
+  max_fixes_per_scan: 100  # More fixes for thorough scan
+  parallel_requests: 5
+
+logging:
+  level: "INFO"
+  format: "rich"

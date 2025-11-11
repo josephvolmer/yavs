@@ -1,0 +1,50 @@
+stages:
+  - security
+
+security-scan:
+  stage: security
+  image: python:3.11-slim
+
+  variables:
+    YAVS_OUTPUT_DIR: "scan-results"
+
+  before_script:
+    - pip install yavs
+    - apt-get update && apt-get install -y git
+
+  script:
+    - |
+      yavs scan . \
+        --all \
+        --output-dir $YAVS_OUTPUT_DIR \
+        --sarif $YAVS_OUTPUT_DIR/results.sarif \
+        --json $YAVS_OUTPUT_DIR/results.json \
+        --fail-on HIGH,CRITICAL \
+        --ignore "node_modules/" \
+        --ignore "vendor/" \
+        --ai-summarize
+
+    - yavs report $YAVS_OUTPUT_DIR/results.json \
+        --output $YAVS_OUTPUT_DIR/security-report.html
+
+  artifacts:
+    when: always
+    paths:
+      - $YAVS_OUTPUT_DIR/
+    reports:
+      sast: $YAVS_OUTPUT_DIR/results.sarif
+    expire_in: 30 days
+
+  allow_failure: false
+
+  only:
+    - main
+    - merge_requests
+    - schedules
+
+# Scheduled scan (optional)
+scheduled-security-scan:
+  extends: security-scan
+  only:
+    - schedules
+  allow_failure: true

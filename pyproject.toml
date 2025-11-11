@@ -1,0 +1,102 @@
+[project]
+name = "yavs"
+version = "1.0.0"
+description = "Yet Another Vulnerability Scanner - AI-enhanced, standards-compliant security scanner with SARIF output"
+readme = "README.md"
+authors = [{ name = "YAVS Contributors" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = [
+    "security",
+    "vulnerability",
+    "scanner",
+    "sarif",
+    "sast",
+    "sca",
+    "sbom",
+    "iac",
+    "compliance",
+    "ai",
+    "trivy",
+    "semgrep",
+    "bandit",
+    "checkov"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+]
+
+dependencies = [
+    "typer[all]>=0.9.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+    "sarif-tools>=3.0.0",
+    "anthropic>=0.18.0",
+    "openai>=1.0.0",
+    "semgrep>=1.0.0",
+    "checkov>=3.0.0",
+    "bandit>=1.7.0",
+    "jinja2>=3.1.0",
+    "markdown>=3.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+yavs = "yavs.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/josephvolmer/yavs"
+Documentation = "https://github.com/josephvolmer/yavs#readme"
+Repository = "https://github.com/josephvolmer/yavs"
+Issues = "https://github.com/josephvolmer/yavs/issues"
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+yavs = ["templates/*.jinja", "templates/*.html", "templates/*.css", "templates/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --cov=yavs --cov-report=term-missing"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]

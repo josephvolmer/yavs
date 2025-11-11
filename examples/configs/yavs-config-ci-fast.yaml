@@ -1,0 +1,83 @@
+# CI/CD Fast Scan Configuration
+# Optimized for speed - runs only critical scanners with high/critical severity filter
+
+scan:
+  directories:
+    - "."
+
+  ignore_paths:
+    - "node_modules/"
+    - "vendor/"
+    - ".venv/"
+    - "venv/"
+    - "__pycache__/"
+    - ".git/"
+    - "dist/"
+    - "build/"
+
+metadata:
+  project: null  # Auto-detect
+  branch: null   # Auto-detect
+  commit_hash: null  # Auto-detect
+
+scanners:
+  trivy:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+  semgrep:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+  bandit:
+    enabled: false  # Skip for speed
+    timeout: 300
+    flags: ""
+
+  checkov:
+    enabled: true
+    timeout: 300
+    flags: ""
+
+# Mode-specific configuration: Focus on speed and critical issues
+modes:
+  # SBOM mode: Only critical vulnerabilities
+  sbom:
+    scanners: [trivy]
+    trivy:
+      security_checks: [vuln]  # Skip secrets and licenses for speed
+      flags: "--severity HIGH,CRITICAL"  # Only high/critical
+
+  # SAST mode: Only Semgrep (faster than Bandit)
+  sast:
+    scanners: [semgrep]
+    semgrep:
+      flags: "--severity ERROR"  # Only errors
+
+  # Compliance mode: Checkov only (skip Trivy config checks)
+  compliance:
+    scanners: [checkov]
+    checkov:
+      flags: "--quiet --compact"
+
+  # All mode: Fast combination
+  all:
+    scanners: [trivy, semgrep, checkov]  # Skip bandit
+    trivy:
+      security_checks: [vuln, config]
+      flags: "--severity HIGH,CRITICAL"
+
+output:
+  directory: "."
+  json: "scan-results.json"
+  sarif: "scan-results.sarif"
+  structured: false  # Use flat format for CI
+
+ai:
+  enabled: false  # Disable AI for speed in CI
+
+logging:
+  level: "WARNING"  # Less verbose
+  format: "rich"

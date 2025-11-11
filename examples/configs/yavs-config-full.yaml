@@ -1,0 +1,238 @@
+# YAVS Configuration File
+# Configure scanner behavior, AI settings, and output options
+# All settings can be overridden with command-line arguments
+
+# Scan configuration
+scan:
+  # Default directories to scan (can be overridden with command-line arguments)
+  # Examples:
+  #   - "."           # Current directory
+  #   - "src"         # Specific subdirectory
+  #   - "/path/to/code"  # Absolute path
+  directories:
+    - "."
+
+  # Ignore paths (regex patterns) - filter findings from these paths
+  #
+  # IMPORTANT: These patterns ONLY filter vulnerability findings, NOT SBOM generation
+  # - SBOM will include ALL dependencies (including node_modules/, vendor/, etc.)
+  # - Vulnerability findings from ignored paths will be filtered out
+  # - Patterns are regex (not glob) matched against file paths in findings
+  # - Can be extended with --ignore flag on command line
+  #
+  # Why separate SBOM from ignore?
+  # - SBOM = complete software inventory (you want ALL dependencies listed)
+  # - Ignore = reduce noise in vulnerability reports (you may not care about test file vulns)
+  #
+  # Examples:
+  #   - "node_modules/"     # Ignore node_modules directory
+  #   - "vendor/"           # Ignore vendor directory
+  #   - ".*\\.min\\.js$"    # Ignore minified JS files
+  #   - "test/|tests/"      # Ignore test directories
+  ignore_paths:
+    - "node_modules/"
+    - "vendor/"
+    - "\\.venv/"
+    - "venv/"
+    - "__pycache__/"
+    - "\\.git/"
+    - "dist/"
+    - "build/"
+    - "target/"           # Rust/Java build artifacts
+    - "\\.egg-info/"
+    - ".*\\.min\\.js$"
+    - ".*\\.min\\.css$"
+
+# Project metadata configuration
+# These values will be included in scan results and reports
+# Can be overridden with command-line arguments (--project, --branch, --commit-hash)
+# If not specified, YAVS will auto-detect from directory name and git repository
+metadata:
+  project: null        # Project name (null = auto-detect from directory name)
+  branch: null         # Git branch (null = auto-detect from git)
+  commit_hash: null    # Git commit hash (null = auto-detect from git)
+
+scanners:
+  # Trivy: Container/dependency scanner
+  # Scans for CVEs, secrets, licenses, and config issues
+  trivy:
+    enabled: true
+    timeout: 300
+    flags: ""  # Additional CLI flags (highest priority - overrides everything)
+               # Example: "--severity HIGH,CRITICAL"
+    native_config: null  # Path to trivy.yaml config file (extends/overrides YAVS baseline)
+                         # Example: "config/trivy.yaml"
+                         # See: https://aquasecurity.github.io/trivy/latest/docs/configuration/
+                         # Precedence: flags > native_config > YAVS defaults
+
+  # Semgrep: Multi-language SAST
+  # Supports 20+ languages with customizable rules
+  semgrep:
+    enabled: true
+    timeout: 300
+    flags: ""  # Additional CLI flags (highest priority)
+               # Example: "--config=p/owasp-top-10"
+    native_config: null  # Path to .semgrep.yml config file (extends/overrides YAVS baseline)
+                         # Example: "config/.semgrep.yml"
+                         # See: https://semgrep.dev/docs/writing-rules/rule-syntax/
+                         # Precedence: flags > native_config > YAVS defaults
+
+  # Bandit: Python-specific SAST
+  # Focused Python security scanner
+  bandit:
+    enabled: true
+    timeout: 300
+    flags: ""  # Additional CLI flags (highest priority)
+               # Example: "--severity-level high"
+    native_config: null  # Path to .bandit config file (extends/overrides YAVS baseline)
+                         # Example: "config/.bandit"
+                         # See: https://bandit.readthedocs.io/en/latest/config.html
+                         # Precedence: flags > native_config > YAVS defaults
+
+  # BinSkim: Binary security analysis
+  # Analyzes compiled binaries (PE/ELF) for security issues
+  binskim:
+    enabled: true
+    timeout: 300
+    flags: ""  # Additional CLI flags (highest priority)
+    native_config: null  # Path to .gdnconfig file (extends/overrides YAVS baseline)
+                         # Example: "config/.gdnconfig"
+                         # Precedence: flags > native_config > YAVS defaults
+
+  # Checkov: IaC/compliance scanner
+  # Scans Terraform, K8s, Docker, CloudFormation, etc.
+  checkov:
+    enabled: true
+    timeout: 300
+    flags: ""  # Additional CLI flags (highest priority)
+               # Example: "--skip-check CKV_AWS_1"
+    native_config: null  # Path to .checkov.yaml config file (extends/overrides YAVS baseline)
+                         # Example: "config/.checkov.yaml"
+                         # See: https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+                         # Precedence: flags > native_config > YAVS defaults
+
+# Mode-specific configuration
+# Control which scanners run in each mode and customize their behavior
+modes:
+  # SBOM mode (--sbom): Software Bill of Materials + dependency scanning
+  sbom:
+    scanners: [trivy]  # Which scanners to run in this mode
+    trivy:
+      security_checks: [vuln, secret, license]  # What Trivy scans for
+      # Optional: Add mode-specific flags
+      # flags: "--severity HIGH,CRITICAL"  # Only show high/critical in SBOM mode
+
+  # SAST mode (--sast): Static Application Security Testing
+  sast:
+    scanners: [semgrep, bandit]  # Remove bandit if you don't want Python scanning
+    # Optional: Add mode-specific scanner configs
+    # semgrep:
+    #   flags: "--config=p/owasp-top-10"  # Use specific ruleset in SAST mode
+
+  # Compliance mode (--compliance): Infrastructure as Code compliance
+  compliance:
+    scanners: [checkov, trivy]  # Checkov + Trivy config checks
+    trivy:
+      security_checks: [config]  # Only scan for config issues
+    # Optional: Add mode-specific configs
+    # checkov:
+    #   flags: "--framework terraform"  # Only scan Terraform in compliance mode
+
+  # All mode (--all): Run everything
+  all:
+    inherit: true  # Inherit and combine all modes
+    # OR define explicit scanner list:
+    # scanners: [trivy, semgrep, bandit, checkov]
+    # trivy:
+    #   security_checks: [vuln, secret, license, config]  # All Trivy checks
+
+# Output configuration
+output:
+  directory: "."            # Output directory (default: current directory)
+  json: "yavs-results.json" # JSON results filename
+  sarif: "yavs-results.sarif" # SARIF results filename
+
+  # Output format
+  structured: true          # Use structured output format by default (organized by category)
+                            # Set to false for flat array format
+
+  # Per-tool output files
+  # When enabled, generates individual files for each scanner tool in addition to unified output
+  # Example outputs: trivy.json, semgrep.json, checkov.json, bandit.json
+  per_tool_files: false     # Set to true to enable per-tool output files
+
+# AI-powered features
+ai:
+  enabled: true
+
+  # Provider: "anthropic" or "openai"
+  # Leave null for auto-detection based on API keys
+  provider: null
+
+  # Model selection (provider-specific)
+  # Anthropic: claude-sonnet-4-5-20250929, claude-3-5-sonnet-20241022
+  # OpenAI: gpt-4o, gpt-4-turbo
+  # Leave null to use provider default
+  model: null
+
+  # AI generation parameters
+  max_tokens: 4096      # Maximum response length
+  temperature: 0.0      # Creativity (0.0=deterministic, 1.0=creative)
+
+  # AI features (enable/disable specific AI capabilities)
+  features:
+    fix_suggestions: true  # Generate remediation guidance for findings (steps, commands, examples)
+    summarize: true        # Generate executive summaries of scan results
+    triage: true           # Cluster and prioritize findings by similarity
+
+  # Fix generation limits
+  max_fixes_per_scan: 50  # Maximum number of fixes to generate per scan (null = unlimited)
+  parallel_requests: 5    # Number of parallel AI requests for fix generation (1-10)
+
+  # Rate limiting to respect API provider limits
+  rate_limits:
+    anthropic:
+      requests_per_minute: 50   # Claude API tier 1 limit
+      tokens_per_minute: 40000  # Claude API tier 1 limit
+    openai:
+      requests_per_minute: 500  # GPT-4 tier 1 limit
+      tokens_per_minute: 30000  # GPT-4 tier 1 limit
+
+  # Summary/Triage output configuration
+  summary:
+    output_file: "yavs-ai-summary.json"  # Filename for summary output
+    enrich_scan_results: false            # If true, add summary to scan results file instead of separate file
+
+# Severity mapping for consistent severity levels across scanners
+# Maps scanner-specific severity levels to YAVS standard levels
+# Standard levels: CRITICAL, HIGH, MEDIUM, LOW, INFO
+severity_mapping:
+  # Semgrep mappings
+  ERROR: "HIGH"
+  WARNING: "MEDIUM"
+
+  # SARIF mappings (BinSkim)
+  error: "HIGH"
+  warning: "MEDIUM"
+  note: "LOW"
+  none: "INFO"
+
+  # Default mappings (already standard)
+  CRITICAL: "CRITICAL"
+  HIGH: "HIGH"
+  MEDIUM: "MEDIUM"
+  LOW: "LOW"
+  INFO: "INFO"
+  UNKNOWN: "LOW"
+
+# Logging configuration
+logging:
+  level: "INFO"           # Log level: DEBUG, INFO, WARNING, ERROR
+  format: "rich"          # Format: rich (colored) or json (structured)
+
+  # File logging (optional)
+  file:
+    enabled: false        # Enable logging to file
+    path: "yavs.log"      # Log file path
+    max_bytes: 10485760   # Max log file size (10MB)
+    backup_count: 3       # Number of backup files to keep

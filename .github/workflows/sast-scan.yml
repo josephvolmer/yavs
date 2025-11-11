@@ -1,0 +1,60 @@
+name: SAST Scan
+
+# Static application security testing
+# Scans source code for security vulnerabilities
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sast-scan:
+    name: SAST Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install YAVS and SAST scanners
+        run: |
+          pip install -e .
+          pip install semgrep bandit
+
+      - name: Run SAST scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          yavs scan --sast \
+            --continue-on-error \
+            --flat \
+            --json sast-results.json \
+            --sarif sast-results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: sast-results.sarif
+          category: yavs-sast-scan
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sast-scan-results
+          path: |
+            sast-results.json
+            sast-results.sarif
+          retention-days: 30

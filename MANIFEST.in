@@ -1,0 +1,27 @@
+# Include license and readme
+include LICENSE
+include README.md
+include CONTRIBUTING.md
+
+# Include documentation
+recursive-include docs *.md *.json
+recursive-include docs/images *.png
+
+# Include examples
+recursive-include examples *.yaml *.yml *.txt *.md
+
+# Include templates for HTML reports
+recursive-include src/yavs/templates *.jinja *.html *.css *.js
+
+# Exclude compiled Python files
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude *.so
+
+# Exclude development files
+exclude .env
+exclude .env.example
+exclude Makefile
+recursive-exclude tests *
+recursive-exclude scripts *
+recursive-exclude .github *

@@ -1,0 +1,193 @@
+name: Dependency Scan
+
+# Fast dependency vulnerability scan
+# Generates SBOM and scans dependencies for CVEs using Trivy
+
+on:
+  # Automatic triggers disabled - manual trigger only
+  # push:
+  #   branches: [main, develop]
+  #   paths:
+  #     - '**/requirements.txt'
+  #     - '**/package.json'
+  #     - '**/go.mod'
+  #     - '**/Gemfile'
+  #     - '**/pom.xml'
+  #     - '**/build.gradle'
+  #     - '**/Cargo.toml'
+  # pull_request:
+  #   branches: [main, develop]
+  #   paths:
+  #     - '**/requirements.txt'
+  #     - '**/package.json'
+  #     - '**/go.mod'
+  #     - '**/Gemfile'
+  #     - '**/pom.xml'
+  #     - '**/build.gradle'
+  #     - '**/Cargo.toml'
+  workflow_dispatch:
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install YAVS and Trivy
+        run: |
+          pip install -e .
+
+          # Install Trivy only (faster than all scanners)
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Run dependency scan (BOM/SCA only)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Only run Trivy for fast dependency checking
+          yavs scan --sbom \
+            --continue-on-error \
+            --flat \
+            --json dependency-scan.json \
+            --sarif dependency-scan.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: dependency-scan.sarif
+          category: yavs-dependency-scan
+
+      - name: Analyze results
+        id: analyze
+        if: always()
+        run: |
+          if [ ! -f dependency-scan.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            TOTAL=0
+            CRITICAL=0
+            HIGH=0
+            MEDIUM=0
+            echo "No scan results available" > vulnerable-packages.txt
+          else
+            # Count vulnerabilities by severity (flat format uses .data array)
+            TOTAL=$(jq '.data | length' dependency-scan.json)
+            CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' dependency-scan.json)
+            HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' dependency-scan.json)
+            MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' dependency-scan.json)
+
+            # Extract packages with issues
+            jq -r '.data[] | select(.package != null) | "\(.package)@\(.version) - \(.severity) - \(.message)"' \
+              dependency-scan.json > vulnerable-packages.txt || echo "No vulnerable packages" > vulnerable-packages.txt
+          fi
+
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+
+      - name: Generate fix suggestions
+        if: always()
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            if [ "${{ steps.analyze.outputs.total }}" -gt 0 ]; then
+              yavs summarize dependency-scan.json > fix-suggestions.md
+            fi
+          else
+            echo "# Dependency Scan Results" > fix-suggestions.md
+            echo "" >> fix-suggestions.md
+            cat vulnerable-packages.txt >> fix-suggestions.md
+          fi
+
+      - name: Comment on PR with dependency issues
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const total = '${{ steps.analyze.outputs.total }}';
+            const critical = '${{ steps.analyze.outputs.critical }}';
+            const high = '${{ steps.analyze.outputs.high }}';
+            const medium = '${{ steps.analyze.outputs.medium }}';
+
+            let fixSuggestions = '';
+            try {
+              fixSuggestions = fs.readFileSync('fix-suggestions.md', 'utf8');
+            } catch (e) {
+              fixSuggestions = 'No suggestions available';
+            }
+
+            let vulnerablePackages = '';
+            try {
+              vulnerablePackages = fs.readFileSync('vulnerable-packages.txt', 'utf8');
+            } catch (e) {
+              vulnerablePackages = 'No vulnerable packages found';
+            }
+
+            const statusEmoji = critical > 0 ? '🔴' : high > 0 ? '🟠' : total > 0 ? '🟡' : '✅';
+
+            const comment = `${statusEmoji} **Dependency Security Scan**
+
+            | Severity | Count |
+            |----------|-------|
+            | Critical | ${critical} |
+            | High | ${high} |
+            | Medium | ${medium} |
+            | **Total** | **${total}** |
+
+            <details>
+            <summary>📦 Vulnerable Packages</summary>
+
+            \`\`\`
+            ${vulnerablePackages}
+            \`\`\`
+
+            </details>
+
+            <details>
+            <summary>🔧 Fix Suggestions</summary>
+
+            ${fixSuggestions}
+
+            </details>
+
+            ---
+            *Scanned dependencies only for fast feedback. Full scan runs on merge to main.*
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Report critical vulnerabilities
+        if: steps.analyze.outputs.critical > 0
+        run: |
+          echo "::warning::Found ${{ steps.analyze.outputs.critical }} critical vulnerabilities in dependencies"
+          echo "Please upgrade vulnerable packages before merging"
+          echo "This is currently a warning. Change to ::error and exit 1 when ready for strict enforcement"

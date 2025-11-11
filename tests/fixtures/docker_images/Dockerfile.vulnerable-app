@@ -1,0 +1,48 @@
+# Intentionally vulnerable Dockerfile for testing
+# This contains multiple security issues that should be detected
+
+# Use outdated base image with known vulnerabilities
+FROM ubuntu:18.04
+
+# Run as root (security issue)
+USER root
+
+# Hardcoded secrets
+ENV API_KEY="sk-1234567890abcdefghijklmnopqrstuvwxyz" \
+    DB_PASSWORD="admin123"
+
+# Install packages without pinning versions
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    python \
+    python-pip \
+    openssh-server
+
+# Copy sensitive files (bad practice)
+COPY .env /app/.env
+COPY id_rsa /root/.ssh/id_rsa
+
+# Expose unnecessary ports
+EXPOSE 22 3306 5432
+
+# Install vulnerable Python packages
+RUN pip install \
+    requests==2.19.0 \
+    flask==0.12.2 \
+    django==1.11.0
+
+# Set weak permissions
+RUN chmod 777 /app
+
+# Download and execute remote script (unsafe)
+RUN curl -sSL https://example.com/install.sh | bash
+
+# Use latest tag (non-deterministic)
+# FROM nginx:latest
+
+# Run application as root
+CMD ["/usr/sbin/sshd", "-D"]
+
+# No HEALTHCHECK defined
+# No USER directive to run as non-root

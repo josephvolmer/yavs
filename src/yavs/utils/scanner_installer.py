@@ -210,20 +210,32 @@ def extract_archive(archive_path: Path, extract_to: Path, binary_name: str) -> O
 
         if archive_path.suffix == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                # Validate all paths before extraction to prevent path traversal
+                # Safe extraction: validate and extract only safe members
+                # This prevents path traversal attacks (CWE-22)
+                safe_members = []
                 for member in zip_ref.namelist():
                     member_path = (extract_to / member).resolve()
                     if not member_path.is_relative_to(extract_to.resolve()):
                         raise ValueError(f"Path traversal attempt detected: {member}")
-                zip_ref.extractall(extract_to)
+                    safe_members.append(member)
+
+                # Extract only validated members
+                for member in safe_members:
+                    zip_ref.extract(member, extract_to)
         else:  # .tar.gz
             with tarfile.open(archive_path, "r:gz") as tar_ref:
-                # Validate all paths before extraction to prevent path traversal
+                # Safe extraction: validate and extract only safe members
+                # This prevents path traversal attacks (CWE-22)
+                safe_members = []
                 for member in tar_ref.getmembers():
                     member_path = (extract_to / member.name).resolve()
                     if not member_path.is_relative_to(extract_to.resolve()):
                         raise ValueError(f"Path traversal attempt detected: {member.name}")
-                tar_ref.extractall(extract_to)
+                    safe_members.append(member)
+
+                # Extract only validated members
+                for member in safe_members:
+                    tar_ref.extract(member, extract_to)
 
         # Find the binary
         binary_path = extract_to / binary_name
@@ -389,20 +401,68 @@ def install_via_package_manager() -> bool:
             # Try apt-get (Debian/Ubuntu)
             console.print("[cyan]Installing Trivy via apt...[/cyan]")
 
-            commands = [
-                "sudo apt-get install -y wget apt-transport-https gnupg lsb-release",
-                'wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -',
-                'echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list',
-                "sudo apt-get update",
-                "sudo apt-get install -y trivy",
-            ]
+            # Step 1: Install prerequisites without shell
+            result = subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "wget", "apt-transport-https", "gnupg", "lsb-release"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                console.print(f"[yellow]Failed to install prerequisites[/yellow]")
 
-            for cmd in commands:
-                # nosec B602 - shell=True is required for pipe/redirect operations
-                # All commands are hardcoded literals with no user input
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)  # noqa: S602
-                if result.returncode != 0:
-                    console.print(f"[yellow]Command failed: {cmd}[/yellow]")
+            # Step 2: Download and add GPG key (without shell, using pipes)
+            try:
+                # Download key
+                wget_proc = subprocess.Popen(
+                    ["wget", "-qO", "-", "https://aquasecurity.github.io/trivy-repo/deb/public.key"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=120
+                )
+                # Add key
+                apt_key_proc = subprocess.Popen(
+                    ["sudo", "apt-key", "add", "-"],
+                    stdin=wget_proc.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=120
+                )
+                wget_proc.stdout.close()  # Allow wget_proc to receive SIGPIPE
+                apt_key_proc.communicate(timeout=120)
+            except (subprocess.TimeoutExpired, Exception) as e:
+                console.print(f"[yellow]Failed to add GPG key: {e}[/yellow]")
+
+            # Step 3: Add repository (without shell, using Python to write file)
+            try:
+                # Get release codename
+                lsb_result = subprocess.run(
+                    ["lsb_release", "-sc"],
+                    capture_output=True, text=True, timeout=30
+                )
+                codename = lsb_result.stdout.strip()
+
+                # Write repo file using Python instead of echo | tee
+                repo_line = f"deb https://aquasecurity.github.io/trivy-repo/deb {codename} main\n"
+                tee_proc = subprocess.run(
+                    ["sudo", "tee", "-a", "/etc/apt/sources.list.d/trivy.list"],
+                    input=repo_line,
+                    capture_output=True, text=True, timeout=30
+                )
+            except Exception as e:
+                console.print(f"[yellow]Failed to add repository: {e}[/yellow]")
+
+            # Step 4: Update package list without shell
+            result = subprocess.run(
+                ["sudo", "apt-get", "update"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                console.print(f"[yellow]apt-get update failed[/yellow]")
+
+            # Step 5: Install Trivy without shell
+            result = subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "trivy"],
+                capture_output=True, text=True, timeout=120
+            )
 
             # Check if installed
             if shutil.which("trivy"):

@@ -210,9 +210,19 @@ def extract_archive(archive_path: Path, extract_to: Path, binary_name: str) -> O
 
         if archive_path.suffix == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
+                # Validate all paths before extraction to prevent path traversal
+                for member in zip_ref.namelist():
+                    member_path = (extract_to / member).resolve()
+                    if not member_path.is_relative_to(extract_to.resolve()):
+                        raise ValueError(f"Path traversal attempt detected: {member}")
                 zip_ref.extractall(extract_to)
         else:  # .tar.gz
             with tarfile.open(archive_path, "r:gz") as tar_ref:
+                # Validate all paths before extraction to prevent path traversal
+                for member in tar_ref.getmembers():
+                    member_path = (extract_to / member.name).resolve()
+                    if not member_path.is_relative_to(extract_to.resolve()):
+                        raise ValueError(f"Path traversal attempt detected: {member.name}")
                 tar_ref.extractall(extract_to)
 
         # Find the binary
@@ -388,7 +398,9 @@ def install_via_package_manager() -> bool:
             ]
 
             for cmd in commands:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                # nosec B602 - shell=True is required for pipe/redirect operations
+                # All commands are hardcoded literals with no user input
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)  # noqa: S602
                 if result.returncode != 0:
                     console.print(f"[yellow]Command failed: {cmd}[/yellow]")
 

@@ -140,12 +140,47 @@ make summarize
 
 ---
 
+## 8. Tool Version Management
+
+YAVS ships with tested scanner versions and supports flexible version control:
+
+```bash
+# Check installed versions and compatibility
+yavs tools status
+yavs tools check
+
+# Upgrade to tested versions (safe)
+yavs tools upgrade
+
+# Upgrade specific tool
+yavs tools upgrade --tool trivy
+
+# Install specific version
+yavs tools install --tool semgrep --version 1.95.0
+
+# Upgrade to absolute latest (may be untested)
+yavs tools upgrade --latest
+
+# Lock versions for reproducibility
+yavs tools pin                    # Creates .yavs-tools.lock
+yavs tools pin --format requirements  # Creates requirements-scanners.txt
+```
+
+**Tested Versions (Nov 2025):**
+- Trivy: 0.67.2
+- Semgrep: 1.142.1
+- Bandit: 1.8.6
+- Checkov: 3.2.492
+
+---
+
 ## Next Steps
 
 - Scan your own projects: `cd ~/my-project && yavs scan --all`
 - Try different AI providers: `yavs summarize results.json --provider openai`
 - Integrate with CI/CD: See `.github/workflows/` for examples
 - Read full docs: `README.md`, `AI_PROVIDER_GUIDE.md`
+- Manage tool versions: `yavs tools --help`
 
 ---
 

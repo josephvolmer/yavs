@@ -122,6 +122,59 @@ class BaseScanner(ABC, LoggerMixin):
         """
         return check_tool_available(self.tool_name)
 
+    def check_version_compatibility(self) -> None:
+        """
+        Check if installed tool version is compatible with YAVS.
+        Logs warnings for incompatible versions but doesn't fail.
+        """
+        try:
+            from ..utils.tool_versions import is_version_compatible
+
+            # Get tool version
+            tool_name = self.tool_name.lower()
+            version_cmd = f"{self.tool_name} --version"
+
+            try:
+                returncode, stdout, stderr = run_command(
+                    version_cmd,
+                    check=False,
+                    timeout=5
+                )
+                if returncode == 0:
+                    # Parse version from output
+                    output = stdout.strip()
+                    version = None
+
+                    # Try to extract version number
+                    for line in output.split('\n'):
+                        if 'version' in line.lower() or 'Version:' in line:
+                            parts = line.split()
+                            for part in parts:
+                                # Look for version-like string (starts with digit)
+                                if part and part[0].isdigit():
+                                    version = part.strip('v')
+                                    break
+                            if version:
+                                break
+
+                    if version:
+                        is_compat, message = is_version_compatible(tool_name, version)
+                        if not is_compat:
+                            self.logger.warning(
+                                f"{self.tool_name} version compatibility: {message}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"{self.tool_name} version check: {message}"
+                            )
+            except Exception:  # nosec B110 - Safe: version check is best-effort
+                # Version check failure is non-critical
+                pass
+
+        except ImportError:
+            # tool_versions module not available (shouldn't happen but be safe)
+            pass
+
     def run(self) -> List[Dict[str, Any]]:
         """
         Execute the scanner and return normalized results.
@@ -140,6 +193,9 @@ class BaseScanner(ABC, LoggerMixin):
 
         if not self.target_path.exists():
             raise ScannerError(f"Target path does not exist: {self.target_path}")
+
+        # Check version compatibility (warns but doesn't fail)
+        self.check_version_compatibility()
 
         self.logger.info(f"Running {self.tool_name} on {self.target_path}")
 

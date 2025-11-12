@@ -199,6 +199,5 @@ make test-all        # Ensure everything works
 
 ## 📚 Related Documentation
 
-- [MAKE_CLEAN_GUIDE.md](MAKE_CLEAN_GUIDE.md) - Detailed cleanup guide
-- [MAKEFILE_GUIDE.md](docs/MAKEFILE_GUIDE.md) - Original Makefile documentation
-- [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) - Repository organization
+- [development/MAKEFILE_GUIDE.md](development/MAKEFILE_GUIDE.md) - Complete Makefile tutorial (includes detailed cleanup guide)
+- [development/DIRECTORY_STRUCTURE.md](development/DIRECTORY_STRUCTURE.md) - Repository organization

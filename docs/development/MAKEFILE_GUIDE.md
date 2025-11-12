@@ -2,7 +2,7 @@
 
 Complete **tutorial-style guide** to using the YAVS Makefile for easy development and testing.
 
-> **Also see**: [MAKEFILE_COMMANDS.md](MAKEFILE_COMMANDS.md) for a quick command reference
+> **Also see**: [MAKEFILE_COMMANDS.md](../MAKEFILE_COMMANDS.md) for a quick command reference
 
 ---
 
@@ -158,21 +158,75 @@ make lint
 
 | Target | Description | What Gets Deleted |
 |--------|-------------|-------------------|
-| `make clean` | Clean build artifacts | `*.pyc`, `__pycache__`, `dist/` |
-| `make clean-results` | Clean scan results | `yavs-results.*` |
+| `make clean` | Clean build artifacts | `*.pyc`, `__pycache__`, `dist/`, `build/`, `.pytest_cache/`, `.coverage`, IDE files |
+| `make clean-artifacts` | Clean scan artifacts | `artifacts/` directory |
+| `make clean-test-results` | Clean test results | Test results in fixture directories |
 | `make clean-all` | Clean everything | All of the above |
 
 **Examples:**
 
 ```bash
-# Clean build artifacts
+# Clean build artifacts (keeps scan results)
 make clean
 
-# Clean old scan results
-make clean-results
+# Clean just scan artifacts
+make clean-artifacts
+
+# Clean test results
+make clean-test-results
 
 # Nuclear option - clean everything
 make clean-all
+```
+
+#### What `make clean` Removes:
+
+**Build Artifacts:**
+- `build/` - Python build directory
+- `dist/` - Distribution packages (wheels, tarballs)
+- `*.egg-info` - Package metadata
+
+**Test Artifacts:**
+- `.pytest_cache/` - Pytest cache directory
+- `.coverage` - Coverage data file
+- `htmlcov/` - HTML coverage reports
+
+**Python Cache:**
+- `__pycache__/` - All Python bytecode cache directories
+- `*.pyc`, `*.pyo` - Compiled Python files
+
+**IDE & Editor Files:**
+- `.claude/` - Claude Code settings
+- `*.swp`, `*.swo` - Vim swap files
+- `*~` - Editor backup files
+
+**OS Files:**
+- `.DS_Store` - macOS metadata files
+
+#### Verification Checklist:
+
+After running `make clean`, these should be gone:
+- [ ] No `.DS_Store` files
+- [ ] No `.coverage` file
+- [ ] No `.pytest_cache/` directory
+- [ ] No `build/` directory
+- [ ] No `dist/` directory
+- [ ] No `__pycache__/` directories
+- [ ] No `*.pyc` files
+
+All these items are also in `.gitignore` so they won't be committed even if they exist.
+
+#### Rebuild After Cleaning:
+
+```bash
+# Rebuild package
+python -m build
+
+# Reinstall development version
+pip install -e .
+
+# Run tests
+pytest tests/
 ```
 
 ---

@@ -27,25 +27,23 @@ yavs/
 ```
 docs/
 ├── README.md                      # Documentation index
-├── QUICKSTART.md                  # Quick start guide
+├── QUICKSTART.md                  # Quick start guide for developers
 ├── AI_PROVIDER_GUIDE.md          # AI features guide
 ├── NATIVE_CONFIGS.md             # Native scanner configs
 ├── OUTPUT_SCHEMAS.md             # Output format documentation
 ├── PRODUCTION_CLI.md             # Production usage guide
-├── WORKFLOWS_OVERVIEW.md         # Common workflows
 ├── SUMMARIZE_BEHAVIOR.md         # AI summarization docs
-├── MAKEFILE_GUIDE.md             # Makefile reference
+├── MAKEFILE_COMMANDS.md          # Quick Makefile reference
 ├── KNOWN_ISSUES.md               # Known issues and limitations
-├── YAVS.MD                       # Detailed project information
-├── development/                   # Development documentation
-│   ├── IMPLEMENTATION_REPORT.md
-│   ├── IMPLEMENTATION_SUMMARY.md
-│   ├── TESTING.md
-│   ├── MULTI_PROVIDER_SUMMARY.md
-│   ├── MULTI_PROVIDER_TEST_RESULTS.md
-│   ├── PACKAGING_SUMMARY.md
-│   ├── PROJECT_SUMMARY.md
-│   └── SHIPPING_READINESS.md
+├── development/                   # Development & maintainer docs
+│   ├── DIRECTORY_STRUCTURE.md    # This file - repository structure
+│   ├── TESTING.md                # Testing guide
+│   ├── MAKEFILE_GUIDE.md         # Complete Makefile tutorial
+│   ├── WORKFLOWS_OVERVIEW.md     # CI/CD workflows overview
+│   ├── PYPI_PUBLISHING_SETUP.md  # PyPI publishing setup
+│   ├── MULTI_PROVIDER_SUMMARY.md # AI provider implementation
+│   ├── MULTI_PROVIDER_TEST_RESULTS.md # AI provider test results
+│   └── RELEASE_CHECKLIST.md      # Release verification checklist
 ├── examples/                      # Example outputs
 │   ├── example-structured-enriched.json
 │   ├── example-structured-with-ai.json

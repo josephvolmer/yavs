@@ -604,7 +604,7 @@ cp .github/workflows/scheduled-scan.yml YOUR_REPO/.github/workflows/
 # Value: your-api-key
 ```
 
-📚 **[Full Workflow Documentation](docs/WORKFLOWS_OVERVIEW.md)**
+📚 **[Full Workflow Documentation](docs/development/WORKFLOWS_OVERVIEW.md)**
 
 ---
 
@@ -882,7 +882,7 @@ YAVS uses automated PyPI publishing via GitHub Actions. Every version bump autom
 7. ✅ CHANGELOG.md section auto-extracted
 
 **Setup Required** (one-time):
-- Configure PyPI trusted publishing (see [docs/PYPI_PUBLISHING_SETUP.md](docs/PYPI_PUBLISHING_SETUP.md))
+- Configure PyPI trusted publishing (see [docs/development/PYPI_PUBLISHING_SETUP.md](docs/development/PYPI_PUBLISHING_SETUP.md))
 - Create GitHub environments: `pypi` and `testpypi`
 - No API tokens needed (uses OIDC)
 
@@ -891,7 +891,7 @@ YAVS uses automated PyPI publishing via GitHub Actions. Every version bump autom
 2. Click "Run workflow"
 3. Select branch and confirm
 
-See [docs/PYPI_PUBLISHING_SETUP.md](docs/PYPI_PUBLISHING_SETUP.md) for complete setup guide.
+See [docs/development/PYPI_PUBLISHING_SETUP.md](docs/development/PYPI_PUBLISHING_SETUP.md) for complete setup guide.
 
 ---
 

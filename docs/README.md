@@ -8,11 +8,18 @@ Comprehensive documentation for YAVS (Yet Another Vulnerability Scanner).
 - **AI_PROVIDER_GUIDE.md** - Guide for using AI features with different providers
 - **NATIVE_CONFIGS.md** - Using native scanner configuration files
 - **OUTPUT_SCHEMAS.md** - Documentation of output format schemas
-- **WORKFLOWS_OVERVIEW.md** - Overview of common workflows
 - **SUMMARIZE_BEHAVIOR.md** - AI summarization feature documentation
 - **PRODUCTION_CLI.md** - Production usage and CLI reference
-- **MAKEFILE_GUIDE.md** - Using the Makefile for development
+- **MAKEFILE_COMMANDS.md** - Quick Makefile command reference
 - **KNOWN_ISSUES.md** - Known issues and limitations
+
+## Developer Documentation
+
+- **development/WORKFLOWS_OVERVIEW.md** - Overview of CI/CD workflows
+- **development/MAKEFILE_GUIDE.md** - Complete Makefile tutorial
+- **development/PYPI_PUBLISHING_SETUP.md** - PyPI publishing setup
+- **development/TESTING.md** - Testing guide
+- **development/DIRECTORY_STRUCTURE.md** - Repository structure
 
 ## Directory Structure
 

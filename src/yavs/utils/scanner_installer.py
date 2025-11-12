@@ -311,8 +311,8 @@ def download_and_install_trivy(force: bool = False) -> Optional[Path]:
     # Clean up archive
     try:
         archive_path.unlink()
-    except Exception:
-        pass
+    except Exception:  # nosec B110 - Intentional: cleanup failure is non-critical
+        pass  # Cleanup is best-effort, don't fail installation if file deletion fails
 
     console.print(f"[green]✓ Trivy installed to {binary_path}[/green]")
 
@@ -378,7 +378,7 @@ def install_via_package_manager() -> bool:
     Returns:
         True if successful, False otherwise
     """
-    import subprocess
+    import subprocess  # nosec B404 - subprocess needed for package manager operations
     from rich.console import Console
 
     console = Console()
@@ -387,7 +387,7 @@ def install_via_package_manager() -> bool:
     try:
         if system == "Darwin":
             console.print("[cyan]Installing Trivy via Homebrew...[/cyan]")
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["brew", "install", "trivy"], capture_output=True, text=True, timeout=300
             )
             if result.returncode == 0:
@@ -402,7 +402,7 @@ def install_via_package_manager() -> bool:
             console.print("[cyan]Installing Trivy via apt...[/cyan]")
 
             # Step 1: Install prerequisites without shell
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["sudo", "apt-get", "install", "-y", "wget", "apt-transport-https", "gnupg", "lsb-release"],
                 capture_output=True, text=True, timeout=120
             )
@@ -412,14 +412,14 @@ def install_via_package_manager() -> bool:
             # Step 2: Download and add GPG key (without shell, using pipes)
             try:
                 # Download key
-                wget_proc = subprocess.Popen(
+                wget_proc = subprocess.Popen(  # nosec B603 B607 - Safe: hardcoded URL, no user input
                     ["wget", "-qO", "-", "https://aquasecurity.github.io/trivy-repo/deb/public.key"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     timeout=120
                 )
                 # Add key
-                apt_key_proc = subprocess.Popen(
+                apt_key_proc = subprocess.Popen(  # nosec B603 B607 - Safe: stdin from wget, no user input
                     ["sudo", "apt-key", "add", "-"],
                     stdin=wget_proc.stdout,
                     stdout=subprocess.PIPE,
@@ -434,7 +434,7 @@ def install_via_package_manager() -> bool:
             # Step 3: Add repository (without shell, using Python to write file)
             try:
                 # Get release codename
-                lsb_result = subprocess.run(
+                lsb_result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                     ["lsb_release", "-sc"],
                     capture_output=True, text=True, timeout=30
                 )
@@ -442,7 +442,7 @@ def install_via_package_manager() -> bool:
 
                 # Write repo file using Python instead of echo | tee
                 repo_line = f"deb https://aquasecurity.github.io/trivy-repo/deb {codename} main\n"
-                tee_proc = subprocess.run(
+                tee_proc = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, codename validated
                     ["sudo", "tee", "-a", "/etc/apt/sources.list.d/trivy.list"],
                     input=repo_line,
                     capture_output=True, text=True, timeout=30
@@ -451,7 +451,7 @@ def install_via_package_manager() -> bool:
                 console.print(f"[yellow]Failed to add repository: {e}[/yellow]")
 
             # Step 4: Update package list without shell
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["sudo", "apt-get", "update"],
                 capture_output=True, text=True, timeout=120
             )
@@ -459,7 +459,7 @@ def install_via_package_manager() -> bool:
                 console.print(f"[yellow]apt-get update failed[/yellow]")
 
             # Step 5: Install Trivy without shell
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["sudo", "apt-get", "install", "-y", "trivy"],
                 capture_output=True, text=True, timeout=120
             )

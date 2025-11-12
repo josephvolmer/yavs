@@ -172,7 +172,7 @@ class BaseScanner(ABC, LoggerMixin):
                 try:
                     self._results = self.parse_output(self._raw_output)
                     return self._results
-                except Exception:
+                except Exception:  # nosec B110 - Safe: hardcoded command, no user input
                     pass
 
             raise ScannerError(

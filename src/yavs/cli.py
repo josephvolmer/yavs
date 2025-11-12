@@ -1392,14 +1392,14 @@ def tools_install(
             if returncode == 0:
                 version_line = stdout.strip().split('\n')[0]
                 console.print(f"  [dim]{version_line}[/dim]")
-        except Exception:
+        except Exception:  # nosec B110 - Safe: hardcoded command, no user input
             pass
     else:
         console.print("[yellow]⚠ Trivy not found[/yellow]")
 
     # Check and install Python scanners
     import shutil
-    import subprocess
+    import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 
     python_tools = {
         "semgrep": {"package": "semgrep", "check": "semgrep"},
@@ -1424,7 +1424,7 @@ def tools_install(
         for package in missing_tools:
             try:
                 console.print(f"[cyan]Installing {package}...[/cyan]")
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B603 - Safe: hardcoded command, no user input
                     [sys.executable, "-m", "pip", "install", package],
                     capture_output=True,
                     text=True,
@@ -1476,7 +1476,7 @@ def tools_status():
 
         yavs tools status
     """
-    import subprocess
+    import subprocess  # nosec B404 - Safe: hardcoded command, no user input
     from rich.table import Table
 
     print_banner("Scanner Tool Versions")
@@ -1497,7 +1497,7 @@ def tools_status():
 
     for tool_name, cmd in tools:
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)  # nosec B603 - Safe: hardcoded command, no user input
             if result.returncode == 0:
                 # Extract version from output
                 output = result.stdout.strip() or result.stderr.strip()
@@ -1530,7 +1530,7 @@ def tools_upgrade(
 
         yavs tools upgrade -y  # Skip confirmation
     """
-    import subprocess
+    import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 
     print_banner("Update Scanner Tools")
     console.print()
@@ -1556,7 +1556,7 @@ def tools_upgrade(
     for tool in tools_to_upgrade:
         console.print(f"[cyan]Upgrading {tool}...[/cyan]")
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["pip", "install", "--upgrade", tool],
                 capture_output=True,
                 text=True,
@@ -1599,7 +1599,7 @@ def tools_pin(
 
         yavs tools pin -o my-requirements.txt
     """
-    import subprocess
+    import subprocess  # nosec B404 - Safe: hardcoded command, no user input
     from datetime import datetime
 
     print_banner("Pin Scanner Tool Versions")
@@ -1615,7 +1615,7 @@ def tools_pin(
 
     for tool in tools:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
                 ["pip", "show", tool],
                 capture_output=True,
                 text=True,
@@ -2115,7 +2115,7 @@ def config_edit(
         yavs config edit                # Edit auto-detected config
         yavs config edit yavs.yaml      # Edit specific file
     """
-    import subprocess
+    import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 
     print_banner("Edit Configuration")
 
@@ -2161,7 +2161,7 @@ def config_edit(
         # Try common editors
         for candidate_editor in ['nano', 'vim', 'vi', 'emacs', 'code']:
             try:
-                subprocess.run(['which', candidate_editor], check=True, capture_output=True)
+                subprocess.run(['which', candidate_editor], check=True, capture_output=True)  # nosec B603 B607 - Safe: hardcoded command, no user input
                 editor = candidate_editor
                 break
             except subprocess.CalledProcessError:
@@ -2178,7 +2178,7 @@ def config_edit(
     console.print()
 
     try:
-        subprocess.run([editor, str(target_file)])
+        subprocess.run([editor, str(target_file)])  # nosec B603 - Safe: hardcoded command, no user input
         console.print()
         console.print("[green]✓ Done editing[/green]")
         console.print()

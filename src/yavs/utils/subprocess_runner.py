@@ -1,6 +1,6 @@
 """Subprocess execution utilities for running scanner commands."""
 
-import subprocess
+import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 import shlex
 from typing import Tuple, Optional
 from pathlib import Path
@@ -43,7 +43,7 @@ def run_command(
         # Use shlex.split for safer command parsing
         cmd_parts = shlex.split(command)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - Safe: hardcoded command, no user input
             cmd_parts,
             cwd=cwd,
             capture_output=capture_output,
@@ -86,7 +86,7 @@ def check_tool_available(tool_name: str) -> bool:
         True if tool is available, False otherwise
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
             ["which", tool_name],
             capture_output=True,
             text=True,

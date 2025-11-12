@@ -1,6 +1,6 @@
 """Project metadata extraction utilities."""
 
-import subprocess
+import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -17,7 +17,7 @@ def get_git_commit_hash(project_path: Path) -> Optional[str]:
         Commit hash or None if not a git repo
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
             ["git", "rev-parse", "HEAD"],
             cwd=project_path,
             capture_output=True,
@@ -42,7 +42,7 @@ def get_git_branch(project_path: Path) -> Optional[str]:
         Branch name or None if not a git repo
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=project_path,
             capture_output=True,

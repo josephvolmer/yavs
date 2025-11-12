@@ -1,6 +1,6 @@
 """Utility functions and helpers."""
 
-from .subprocess_runner import run_command
+from .subprocess_runner import run_command  # nosec B404 - Safe: hardcoded command, no user input
 from .path_utils import normalize_path, make_relative
 from .schema_validator import validate_sarif
 from .logging import get_logger

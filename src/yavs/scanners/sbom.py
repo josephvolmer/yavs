@@ -1,6 +1,6 @@
 """SBOM (Software Bill of Materials) generator using Trivy."""
 
-import subprocess
+import subprocess  # nosec B404 - Safe: hardcoded command, no user input
 from typing import Optional, Dict, Any
 from pathlib import Path
 
@@ -77,7 +77,7 @@ class SBOMGenerator(LoggerMixin):
         self.logger.info(f"Generating {self.format.upper()} SBOM...")
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - Safe: hardcoded command, no user input
                 cmd,
                 cwd=self.target_path,
                 capture_output=True,

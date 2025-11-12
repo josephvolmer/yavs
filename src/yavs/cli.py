@@ -50,14 +50,7 @@ def main_callback(ctx: typer.Context):
         print_banner(f"v{__version__} - Yet Another Vulnerability Scanner")
         # Typer will automatically show help after this
 
-
-def print_banner(subtitle: Optional[str] = None):
-    """
-    Print the YAVS ASCII art banner.
-
-    Args:
-        subtitle: Optional subtitle to display below the banner
-    """
+def build_banner_lines():
     # Create ASCII art lines
     lines = [
         "██╗   ██╗ █████╗ ██╗   ██╗███████╗",
@@ -67,6 +60,17 @@ def print_banner(subtitle: Optional[str] = None):
         "   ██║   ██║  ██║ ╚████╔╝ ███████║",
         "   ╚═╝   ╚═╝  ╚═╝  ╚═══╝  ╚══════╝"
     ]
+    return lines    
+
+def print_banner(subtitle: Optional[str] = None):
+    """
+    Print the YAVS ASCII art banner.
+
+    Args:
+        subtitle: Optional subtitle to display below the banner
+    """
+    # load ASCII art lines
+    lines = build_banner_lines()
 
     # Build banner with proper centering
     banner_parts = []
@@ -2974,8 +2978,8 @@ def show_full_man():
       --continue-on-error Continue if a scanner fails
 
     Baseline Features:
-      --baseline PATH     Compare against baseline, show only new findings
-      --baseline-generate PATH  Generate baseline file from scan results
+      --baseline PATH     Use suppression baseline file to filter findings
+                          (Create baselines with: yavs ignore export results.json -o baseline.yaml)
 
     Examples:
       yavs scan --all                           # Scan current directory
@@ -3170,11 +3174,12 @@ Load custom config:
 
 ## BASELINE WORKFLOW
 
-Generate baseline from current state:
-    yavs scan --all --baseline-generate baseline.json
+Create suppression baseline from scan results:
+    yavs scan --all -o results.json
+    yavs ignore export results.json -o .yavs-baseline.yaml
 
-Compare future scans against baseline (show only new findings):
-    yavs scan --all --baseline baseline.json
+Use baseline to suppress known findings:
+    yavs scan --all --baseline .yavs-baseline.yaml
 
 Diff two scan results:
     yavs diff baseline.json current.json
@@ -3254,11 +3259,12 @@ AI features are optional. YAVS works without AI but won't generate:
     # Fail CI on HIGH or CRITICAL findings
     yavs scan --all --fail-on HIGH -q || exit 1
 
-    # Scan and generate baseline for first run
-    yavs scan --all --baseline-generate baseline.json
+    # Create suppression baseline from scan results
+    yavs scan --all -o results.json
+    yavs ignore export results.json -o .yavs-baseline.yaml
 
-    # Compare against baseline in future runs
-    yavs scan --all --baseline baseline.json
+    # Use baseline to suppress known findings
+    yavs scan --all --baseline .yavs-baseline.yaml
 
 ### Complete Workflow
     # 1. Scan with all tools
@@ -3453,9 +3459,10 @@ def get_man_sections():
     yavs tools pin       # Pin versions for reproducibility
 
 ## Quick Examples
-    # Scan with baseline tracking
-    yavs scan --all --baseline-generate baseline.json  # First run
-    yavs scan --all --baseline baseline.json           # Future runs
+    # Scan with baseline workflow
+    yavs scan --all -o results.json                    # First run
+    yavs ignore export results.json -o baseline.yaml   # Create baseline
+    yavs scan --all --baseline baseline.yaml           # Future runs
 
     # Docker image scanning
     yavs scan --images nginx:latest --sbom
@@ -3504,8 +3511,7 @@ Scan filesystem and/or Docker images for vulnerabilities.
     --continue-on-error Continue even if a scanner fails
 
 ### Baseline Features
-    --baseline PATH            Compare against baseline (show only new)
-    --baseline-generate PATH   Generate baseline from scan results
+    --baseline PATH            Use suppression baseline to filter findings
 
 ### Configuration
     --config PATH       Path to YAML config file
@@ -4161,11 +4167,12 @@ logging:
 
 ## Baseline Workflow
 
-### Initial baseline
-    yavs scan --all --baseline-generate baseline.json
+### Create suppression baseline
+    yavs scan --all -o results.json
+    yavs ignore export results.json -o .yavs-baseline.yaml
 
-### Compare against baseline
-    yavs scan --all --baseline baseline.json
+### Use baseline to suppress findings
+    yavs scan --all --baseline .yavs-baseline.yaml
 
 ### Show only new findings
     yavs scan --all --baseline baseline.json --quiet
@@ -4422,8 +4429,9 @@ steps:
 
 ### First Run (Create Baseline)
 ```bash
-yavs scan --all --baseline-generate baseline.json
-git add baseline.json
+yavs scan --all -o results.json
+yavs ignore export results.json -o .yavs-baseline.yaml
+git add .yavs-baseline.yaml
 git commit -m "Add security baseline"
 ```
 

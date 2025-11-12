@@ -81,7 +81,7 @@ cd /path/to/your/project
 yavs scan --all
 
 # With specific scanners
-yavs scan --sast --bom --compliance
+yavs scan --sast --sbom --compliance
 
 # AI summary
 yavs summarize yavs-results.json --provider openai

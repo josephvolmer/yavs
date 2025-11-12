@@ -260,12 +260,13 @@ class HTMLReportGenerator:
             'by_category': by_category,
         }
 
-    def _load_sbom_file(self, sbom_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _load_sbom_file(self, sbom_info: Dict[str, Any], scan_results_path: Path) -> Optional[Dict[str, Any]]:
         """
         Load SBOM file contents if available.
 
         Args:
             sbom_info: SBOM metadata from scan results
+            scan_results_path: Path to the scan results file (to resolve relative paths)
 
         Returns:
             Parsed SBOM data or None if not available
@@ -274,14 +275,26 @@ class HTMLReportGenerator:
             return None
 
         sbom_path = Path(sbom_info['location'])
-        if not sbom_path.exists():
-            return None
 
-        try:
-            with open(sbom_path, 'r') as f:
-                return json.load(f)
-        except Exception:
-            return None
+        # Try absolute path first
+        if sbom_path.exists():
+            try:
+                with open(sbom_path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return None
+
+        # Try relative to scan results directory
+        # This handles cases where the HTML is generated separately from the scan
+        relative_sbom_path = scan_results_path.parent / sbom_path.name
+        if relative_sbom_path.exists():
+            try:
+                with open(relative_sbom_path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return None
+
+        return None
 
     def generate(
         self,
@@ -302,7 +315,7 @@ class HTMLReportGenerator:
 
         # Load SBOM contents if available
         if 'sbom' in data and data['sbom']:
-            sbom_contents = self._load_sbom_file(data['sbom'])
+            sbom_contents = self._load_sbom_file(data['sbom'], scan_results_path)
             if sbom_contents:
                 data['sbom_data'] = sbom_contents
 

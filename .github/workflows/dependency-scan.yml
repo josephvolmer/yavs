@@ -31,7 +31,9 @@ jobs:
 
       - name: Install scanner dependencies
         run: |
-          yavs tools install --no-python-tools
+          # Note: Installing all tools for consistency
+          # --sbom flag will ensure only Trivy runs for dependency scanning
+          yavs tools install
 
       - name: Verify installation
         run: |

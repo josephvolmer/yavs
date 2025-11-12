@@ -30,7 +30,9 @@ jobs:
 
       - name: Install scanner dependencies
         run: |
-          yavs tools install --no-trivy
+          # Note: Even though --sast only uses Semgrep/Bandit,
+          # pre-flight check detects pyproject.toml and requires Trivy
+          yavs tools install
 
       - name: Verify installation
         run: |

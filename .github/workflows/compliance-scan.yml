@@ -30,6 +30,8 @@ jobs:
 
       - name: Install scanner dependencies
         run: |
+          # Note: Pre-flight check detects dependency files and requires Trivy
+          # even though --compliance only uses Checkov
           yavs tools install
 
       - name: Verify installation

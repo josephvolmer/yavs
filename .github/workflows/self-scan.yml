@@ -87,11 +87,11 @@ jobs:
             HIGH=0
           else
             # Check for structured format (has category keys)
-            if jq -e '.sast or .sbom or .compliance' self-scan-output/yavs-results.json > /dev/null 2>&1; then
-              # Structured format
-              CRITICAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="CRITICAL")) | length' self-scan-output/yavs-results.json)
-              HIGH=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="HIGH")) | length' self-scan-output/yavs-results.json)
-              TOTAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | length' self-scan-output/yavs-results.json)
+            if jq -e '.sast or .compliance' self-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .sast[].issues[] and .compliance[].violations[]
+              CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' self-scan-output/yavs-results.json)
+              HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' self-scan-output/yavs-results.json)
+              TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' self-scan-output/yavs-results.json)
             elif jq -e '.data' self-scan-output/yavs-results.json > /dev/null 2>&1; then
               # Flat format with .data array
               CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' self-scan-output/yavs-results.json)

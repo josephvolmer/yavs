@@ -1321,6 +1321,8 @@ app.add_typer(tools_app, name="tools")
 
 @tools_app.command("install")
 def tools_install(
+    tool: Optional[str] = typer.Option(None, "--tool", help="Install specific tool (trivy, semgrep, bandit, checkov)"),
+    version: Optional[str] = typer.Option(None, "--version", help="Install specific version (upgrades or downgrades)"),
     install_trivy: bool = typer.Option(True, "--trivy/--no-trivy", help="Install Trivy scanner"),
     install_python_tools: bool = typer.Option(True, "--python-tools/--no-python-tools", help="Install Python scanners (semgrep, bandit, checkov)"),
     use_package_manager: bool = typer.Option(False, "--use-brew/--no-brew", help="Use package manager (brew/apt) for Trivy"),
@@ -1333,10 +1335,12 @@ def tools_install(
 
     Examples:
 
-        yavs tools install               # Install all tools
-        yavs tools install --use-brew    # Use package manager for Trivy
-        yavs tools install --no-trivy    # Only install Python tools
-        yavs tools install --force       # Force reinstall all tools
+        yavs tools install                        # Install all tools (tested versions)
+        yavs tools install --tool trivy           # Install Trivy only (tested version)
+        yavs tools install --tool trivy --version 0.60.1  # Install specific version
+        yavs tools install --use-brew             # Use package manager for Trivy
+        yavs tools install --no-trivy             # Only install Python tools
+        yavs tools install --force                # Force reinstall all tools
     """
     print_banner("Install Scanner Tools")
 
@@ -1345,9 +1349,86 @@ def tools_install(
         install_via_package_manager,
         find_trivy_binary,
     )
+    from .utils.tool_versions import get_tested_version, is_version_compatible
 
     console.print()
 
+    # Handle specific tool installation
+    if tool:
+        tool = tool.lower()
+        if tool == "trivy":
+            console.print(f"\n[bold]Installing Trivy{f' {version}' if version else ' (tested version)'}...[/bold]")
+
+            if version:
+                # Check if it's a tested version
+                tested_ver = get_tested_version("trivy")
+                if version != tested_ver:
+                    console.print(f"[yellow]⚠ Warning: Installing version {version} (tested version: {tested_ver})[/yellow]")
+
+            if use_package_manager:
+                if version:
+                    console.print("[yellow]⚠ Package manager installation doesn't support specific versions[/yellow]")
+                    console.print("[yellow]  Using direct download instead...[/yellow]")
+                    binary_path = download_and_install_trivy(force=True, version=version)
+                else:
+                    success = install_via_package_manager()
+                    if not success:
+                        console.print("[yellow]Package manager installation failed, trying direct download...[/yellow]")
+                        binary_path = download_and_install_trivy(force=force, version=version)
+            else:
+                binary_path = download_and_install_trivy(force=True, version=version)
+
+            if not binary_path:
+                console.print("[red]✗ Trivy installation failed[/red]")
+                raise typer.Exit(1)
+
+            console.print(f"[green]✓ Trivy installed successfully[/green]")
+            return
+
+        elif tool in ["semgrep", "bandit", "checkov"]:
+            import subprocess  # nosec B404 - Safe: hardcoded command
+            console.print(f"\n[bold]Installing {tool}{f' {version}' if version else ' (tested version)'}...[/bold]")
+
+            if version:
+                # Check if it's a tested version
+                tested_ver = get_tested_version(tool)
+                if version != tested_ver:
+                    console.print(f"[yellow]⚠ Warning: Installing version {version} (tested version: {tested_ver})[/yellow]")
+
+                package_spec = f"{tool}=={version}"
+            else:
+                # Install tested version
+                from .utils.tool_versions import get_pip_version_specifier
+                package_spec = get_pip_version_specifier(tool)
+
+            try:
+                console.print(f"[cyan]Running: pip install {package_spec}...[/cyan]")
+                result = subprocess.run(  # nosec B603 - Safe: validated input
+                    [sys.executable, "-m", "pip", "install", package_spec],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode == 0:
+                    console.print(f"[green]✓ {tool} installed successfully[/green]")
+                else:
+                    console.print(f"[red]✗ Failed to install {tool}[/red]")
+                    console.print(f"  [dim]{result.stderr}[/dim]")
+                    raise typer.Exit(1)
+            except subprocess.TimeoutExpired:
+                console.print(f"[red]✗ Installation timed out[/red]")
+                raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]✗ Installation error: {str(e)}[/red]")
+                raise typer.Exit(1)
+            return
+
+        else:
+            console.print(f"[red]✗ Unknown tool: {tool}[/red]")
+            console.print("[dim]Supported tools: trivy, semgrep, bandit, checkov[/dim]")
+            raise typer.Exit(1)
+
+    # Install all tools (default behavior)
     # Check current status
     trivy_path = find_trivy_binary()
     if trivy_path and not force:
@@ -1359,7 +1440,7 @@ def tools_install(
         console.print(f"[yellow]⚠ Trivy found at {trivy_path}, reinstalling...[/yellow]")
 
     if install_trivy:
-        console.print("\n[bold]Installing Trivy...[/bold]")
+        console.print("\n[bold]Installing Trivy (tested version)...[/bold]")
 
         if use_package_manager:
             # Try package manager first
@@ -1371,7 +1452,7 @@ def tools_install(
                     console.print("[red]✗ Trivy installation failed[/red]")
                     raise typer.Exit(1)
         else:
-            # Direct download
+            # Direct download (tested version)
             binary_path = download_and_install_trivy(force=force)
             if not binary_path:
                 console.print("[red]✗ Trivy installation failed[/red]")
@@ -1420,12 +1501,15 @@ def tools_install(
 
     # Auto-install missing Python tools if requested
     if missing_tools and install_python_tools:
-        console.print(f"\n[bold]Installing {len(missing_tools)} missing Python scanner(s)...[/bold]")
+        from .utils.tool_versions import get_pip_version_specifier
+        console.print(f"\n[bold]Installing {len(missing_tools)} missing Python scanner(s) (tested versions)...[/bold]")
         for package in missing_tools:
             try:
-                console.print(f"[cyan]Installing {package}...[/cyan]")
+                # Use tested version specification
+                package_spec = get_pip_version_specifier(package)
+                console.print(f"[cyan]Installing {package_spec}...[/cyan]")
                 result = subprocess.run(  # nosec B603 - Safe: hardcoded command, no user input
-                    [sys.executable, "-m", "pip", "install", package],
+                    [sys.executable, "-m", "pip", "install", package_spec],
                     capture_output=True,
                     text=True,
                     timeout=300  # 5 minute timeout
@@ -1516,32 +1600,113 @@ def tools_status():
 
 @tools_app.command("upgrade")
 def tools_upgrade(
+    tool: Optional[str] = typer.Option(None, "--tool", help="Upgrade specific tool (trivy, semgrep, bandit, checkov)"),
+    latest: bool = typer.Option(False, "--latest", help="Upgrade to absolute latest version (bypass tested range)"),
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt")
 ):
     """
-    Update all scanner tools to their latest versions.
+    Update scanner tools within safe version ranges (or to latest).
 
-    Updates: Semgrep, Bandit, Checkov (via pip)
-    Note: Trivy should be updated via system package manager
+    By default, upgrades tools within tested version ranges (safe patches).
+    Use --latest to upgrade to absolute latest versions (may be untested).
 
     Examples:
 
-        yavs tools upgrade
-
-        yavs tools upgrade -y  # Skip confirmation
+        yavs tools upgrade                        # Upgrade all tools (safe ranges)
+        yavs tools upgrade --tool trivy           # Upgrade Trivy only (safe range)
+        yavs tools upgrade --tool semgrep --latest  # Upgrade Semgrep to absolute latest
+        yavs tools upgrade --latest               # Upgrade all to absolute latest
+        yavs tools upgrade -y                     # Skip confirmation
     """
     import subprocess  # nosec B404 - Safe: hardcoded command, no user input
+    from .utils.scanner_installer import download_and_install_trivy
+    from .utils.tool_versions import get_tested_version, get_pip_version_specifier, get_version_range
 
-    print_banner("Update Scanner Tools")
+    print_banner("Upgrade Scanner Tools")
     console.print()
 
+    # If specific tool requested
+    if tool:
+        tool = tool.lower()
+
+        if tool == "trivy":
+            if latest:
+                console.print("[yellow]⚠ Warning: Upgrading Trivy to latest version (may be untested)[/yellow]")
+                if not yes and not typer.confirm("Continue?"):
+                    raise typer.Exit(0)
+
+                # For --latest, we use yavs tools install --tool trivy
+                console.print("[dim]Use 'yavs tools install --tool trivy --version <ver>' to install specific version[/dim]")
+                console.print("[red]Trivy --latest upgrade not yet implemented. Please specify --version.[/red]")
+                raise typer.Exit(1)
+            else:
+                # Upgrade to tested version
+                tested_ver = get_tested_version("trivy")
+                console.print(f"[bold]Upgrading Trivy to tested version {tested_ver}...[/bold]")
+                binary_path = download_and_install_trivy(force=True, version=tested_ver)
+                if binary_path:
+                    console.print(f"[green]✓ Trivy upgraded to {tested_ver}[/green]")
+                else:
+                    console.print("[red]✗ Trivy upgrade failed[/red]")
+                    raise typer.Exit(1)
+            return
+
+        elif tool in ["semgrep", "bandit", "checkov"]:
+            if latest:
+                console.print(f"[yellow]⚠ Warning: Upgrading {tool} to absolute latest (may be untested)[/yellow]")
+                tested_ver = get_tested_version(tool)
+                console.print(f"[dim]  Tested version: {tested_ver}[/dim]")
+
+                if not yes and not typer.confirm("Continue?"):
+                    raise typer.Exit(0)
+
+                package_spec = f"{tool} --upgrade"
+                upgrade_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", tool]
+            else:
+                # Upgrade within safe range
+                tested_ver = get_tested_version(tool)
+                package_spec = get_pip_version_specifier(tool)
+                console.print(f"[bold]Upgrading {tool} to tested version {tested_ver}...[/bold]")
+                upgrade_cmd = [sys.executable, "-m", "pip", "install", package_spec]
+
+            try:
+                console.print(f"[cyan]Running: pip install {package_spec}...[/cyan]")
+                result = subprocess.run(  # nosec B603 - Safe: validated input
+                    upgrade_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    console.print(f"[green]✓ {tool} upgraded successfully[/green]")
+                else:
+                    console.print(f"[red]✗ Failed to upgrade {tool}[/red]")
+                    console.print(f"[dim]{result.stderr}[/dim]")
+                    raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]✗ Error upgrading {tool}: {e}[/red]")
+                raise typer.Exit(1)
+            return
+
+        else:
+            console.print(f"[red]✗ Unknown tool: {tool}[/red]")
+            console.print("[dim]Supported tools: trivy, semgrep, bandit, checkov[/dim]")
+            raise typer.Exit(1)
+
+    # Upgrade all tools
+    if latest:
+        console.print("[yellow]⚠ Warning: Upgrading ALL tools to absolute latest versions[/yellow]")
+        console.print("[dim]  This may install untested versions that could break compatibility[/dim]")
+    else:
+        console.print("[bold]Upgrading all tools to tested versions (safe ranges)...[/bold]")
+
     if not yes:
-        console.print("[yellow]This will upgrade the following tools:[/yellow]")
+        console.print()
+        console.print("[yellow]This will upgrade:[/yellow]")
+        console.print("  • Trivy")
         console.print("  • Semgrep")
         console.print("  • Bandit")
         console.print("  • Checkov")
-        console.print()
-        console.print("[dim]Note: Trivy must be updated via system package manager (brew, apt, etc.)[/dim]")
         console.print()
 
         confirm = typer.confirm("Continue with upgrade?")
@@ -1549,32 +1714,50 @@ def tools_upgrade(
             console.print("[yellow]Upgrade cancelled[/yellow]")
             raise typer.Exit(0)
 
+    # Upgrade Trivy
+    console.print("\n[bold]Upgrading Trivy...[/bold]")
+    tested_ver = get_tested_version("trivy")
+    binary_path = download_and_install_trivy(force=True, version=tested_ver)
+    if binary_path:
+        console.print(f"[green]✓ Trivy upgraded to {tested_ver}[/green]")
+    else:
+        console.print("[yellow]⚠ Trivy upgrade failed (continuing with Python tools)[/yellow]")
+
+    # Upgrade Python tools
     tools_to_upgrade = ["semgrep", "bandit", "checkov"]
+    console.print("\n[bold]Upgrading Python scanners...[/bold]\n")
 
-    console.print("[bold]Upgrading scanner tools...[/bold]\n")
+    for tool_name in tools_to_upgrade:
+        if latest:
+            console.print(f"[cyan]Upgrading {tool_name} to latest...[/cyan]")
+            upgrade_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", tool_name]
+        else:
+            tested_ver = get_tested_version(tool_name)
+            package_spec = get_pip_version_specifier(tool_name)
+            console.print(f"[cyan]Upgrading {tool_name} to {tested_ver}...[/cyan]")
+            upgrade_cmd = [sys.executable, "-m", "pip", "install", package_spec]
 
-    for tool in tools_to_upgrade:
-        console.print(f"[cyan]Upgrading {tool}...[/cyan]")
         try:
-            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
-                ["pip", "install", "--upgrade", tool],
+            result = subprocess.run(  # nosec B603 - Safe: validated input
+                upgrade_cmd,
                 capture_output=True,
                 text=True,
                 timeout=120
             )
             if result.returncode == 0:
-                console.print(f"[green]✓ {tool} upgraded successfully[/green]")
+                console.print(f"[green]✓ {tool_name} upgraded successfully[/green]")
             else:
-                console.print(f"[red]✗ Failed to upgrade {tool}[/red]")
+                console.print(f"[red]✗ Failed to upgrade {tool_name}[/red]")
                 if result.stderr:
                     console.print(f"[dim]{result.stderr}[/dim]")
         except Exception as e:
-            console.print(f"[red]✗ Error upgrading {tool}: {e}[/red]")
+            console.print(f"[red]✗ Error upgrading {tool_name}: {e}[/red]")
         console.print()
 
     console.print("[bold green]Upgrade complete![/bold green]")
     console.print()
     console.print("[dim]Run 'yavs tools status' to verify new versions[/dim]")
+    console.print("[dim]Run 'yavs tools check' to validate compatibility[/dim]")
     console.print("[dim]Run 'yavs tools pin' to save current versions[/dim]")
 
 
@@ -1584,38 +1767,79 @@ def tools_pin(
         None,
         "-o",
         "--output",
-        help="Output file path (default: requirements-scanners.txt)"
+        help="Output file path (default: .yavs-tools.lock)"
+    ),
+    format: str = typer.Option(
+        "lock",
+        "--format",
+        help="Output format: 'lock' (.yavs-tools.lock YAML) or 'requirements' (requirements.txt)"
     )
 ):
     """
-    Create requirements file with current scanner tool versions.
+    Create lock file with current scanner tool versions.
 
-    Generates a requirements.txt file with pinned versions for reproducible builds.
-    Commit this file to lock scanner versions across your team and CI/CD.
+    Generates .yavs-tools.lock (YAML) or requirements-scanners.txt for reproducible builds.
+    Includes all tools: Trivy, Semgrep, Bandit, Checkov.
 
     Examples:
 
-        yavs tools pin
-
-        yavs tools pin -o my-requirements.txt
+        yavs tools pin                           # Create .yavs-tools.lock
+        yavs tools pin --format requirements     # Create requirements-scanners.txt
+        yavs tools pin -o my-lock.yaml          # Custom output file
     """
     import subprocess  # nosec B404 - Safe: hardcoded command, no user input
     from datetime import datetime
+    import yaml
+    from .utils.scanner_installer import find_trivy_binary
+    from .utils.tool_versions import get_tested_version, is_version_compatible
 
     print_banner("Pin Scanner Tool Versions")
     console.print()
 
-    output_file = output or Path("requirements-scanners.txt")
+    # Determine output file
+    if output:
+        output_file = output
+    else:
+        output_file = Path(".yavs-tools.lock") if format == "lock" else Path("requirements-scanners.txt")
 
-    console.print(f"[bold]Creating {output_file}...[/bold]\n")
+    console.print(f"[bold]Capturing installed tool versions...[/bold]\n")
 
-    # Get versions
-    versions = {}
-    tools = ["semgrep", "bandit", "checkov"]
+    # Get all tool versions
+    tool_versions = {}
 
-    for tool in tools:
+    # Get Trivy version
+    trivy_path = find_trivy_binary()
+    if trivy_path:
         try:
-            result = subprocess.run(  # nosec B603 B607 - Safe: hardcoded command, no user input
+            from .utils.subprocess_runner import run_command
+            returncode, stdout, stderr = run_command(f"{trivy_path} --version", check=False, timeout=5)
+            if returncode == 0:
+                # Parse version from output (e.g., "Version: 0.67.2")
+                for line in stdout.strip().split('\n'):
+                    if 'Version:' in line or 'version' in line.lower():
+                        parts = line.split()
+                        for part in parts:
+                            if part[0].isdigit():
+                                trivy_version = part
+                                tested = get_tested_version("trivy")
+                                is_tested = (trivy_version == tested)
+                                tool_versions["trivy"] = {
+                                    "version": trivy_version,
+                                    "tested": is_tested,
+                                    "path": trivy_path
+                                }
+                                console.print(f"[green]✓ Trivy: {trivy_version}{' (tested)' if is_tested else ''}[/green]")
+                                break
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not determine Trivy version[/yellow]")
+    else:
+        console.print("[yellow]⚠ Trivy not found[/yellow]")
+
+    # Get Python tool versions
+    python_tools = ["semgrep", "bandit", "checkov"]
+    for tool in python_tools:
+        try:
+            result = subprocess.run(  # nosec B603 - Safe: hardcoded command
                 ["pip", "show", tool],
                 capture_output=True,
                 text=True,
@@ -1625,35 +1849,203 @@ def tools_pin(
                 for line in result.stdout.split('\n'):
                     if line.startswith('Version:'):
                         version = line.split(':', 1)[1].strip()
-                        versions[tool] = version
-                        console.print(f"[green]✓ {tool}=={version}[/green]")
+                        tested_ver = get_tested_version(tool)
+                        is_tested = (version == tested_ver)
+                        tool_versions[tool] = {
+                            "version": version,
+                            "tested": is_tested
+                        }
+                        console.print(f"[green]✓ {tool}: {version}{' (tested)' if is_tested else ''}[/green]")
                         break
         except Exception as e:
             console.print(f"[yellow]⚠ Could not determine version for {tool}[/yellow]")
 
-    if not versions:
-        console.print("[red]✗ No scanner tools found[/red]")
+    if not tool_versions:
+        console.print("\n[red]✗ No scanner tools found[/red]")
         console.print("[dim]Run 'yavs tools install' to install scanner tools[/dim]")
         raise typer.Exit(1)
 
-    # Write requirements file
+    # Write output
     console.print()
-    with open(output_file, 'w') as f:
-        f.write(f"# Scanner tool versions - Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"# Install with: pip install -r {output_file}\n")
-        f.write("\n")
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        for tool, version in versions.items():
-            f.write(f"{tool}=={version}\n")
+    if format == "lock" or output_file.suffix in ['.yaml', '.yml', '.lock']:
+        # Write YAML lock file
+        lock_data = {
+            "version": "1.0",
+            "generated_at": timestamp,
+            "yavs_version": "1.0.0",  # TODO: Get from package
+            "tools": {}
+        }
 
-        f.write("\n")
-        f.write("# Note: Trivy should be installed via system package manager\n")
-        f.write("# See: https://aquasecurity.github.io/trivy/latest/getting-started/installation/\n")
+        for tool_name, info in tool_versions.items():
+            lock_data["tools"][tool_name] = {
+                "version": info["version"],
+                "tested": info["tested"]
+            }
+            if "path" in info:
+                lock_data["tools"][tool_name]["path"] = info["path"]
 
-    console.print(f"[bold green]✓ Pinned versions saved to {output_file}[/bold green]")
+        with open(output_file, 'w') as f:
+            f.write(f"# YAVS Scanner Tools Lock File\n")
+            f.write(f"# Generated: {timestamp}\n")
+            f.write(f"#\n")
+            f.write(f"# This file locks scanner tool versions for reproducible builds.\n")
+            f.write(f"# Commit this file to ensure consistent scanning across environments.\n")
+            f.write(f"#\n")
+            f.write(f"# To install these versions:\n")
+            f.write(f"#   yavs tools install --tool trivy --version <version>\n")
+            f.write(f"#   pip install semgrep==<version> bandit==<version> checkov==<version>\n")
+            f.write(f"\n")
+            yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
+
+        console.print(f"[bold green]✓ Lock file saved to {output_file}[/bold green]")
+
+    else:
+        # Write requirements.txt format
+        with open(output_file, 'w') as f:
+            f.write(f"# Scanner tool versions - Generated on {timestamp}\n")
+            f.write(f"# Install with: pip install -r {output_file}\n")
+            f.write(f"\n")
+
+            for tool_name, info in tool_versions.items():
+                if tool_name == "trivy":
+                    f.write(f"# Trivy {info['version']} - Install via: yavs tools install --tool trivy --version {info['version']}\n")
+                else:
+                    f.write(f"{tool_name}=={info['version']}\n")
+
+        console.print(f"[bold green]✓ Requirements file saved to {output_file}[/bold green]")
+
     console.print()
     console.print("[dim]Commit this file to your repository for reproducible builds[/dim]")
-    console.print("[dim]Install pinned versions with: pip install -r requirements-scanners.txt[/dim]")
+    if format == "lock":
+        console.print("[dim]Note: Lock file tracks all tools including Trivy[/dim]")
+    else:
+        console.print("[dim]Note: Trivy must be installed separately (see comments in file)[/dim]")
+
+
+@tools_app.command("check")
+def tools_check():
+    """
+    Validate installed scanner tool versions against tested ranges.
+
+    Checks all installed tools and reports compatibility status:
+    - ✓ Tested version (recommended)
+    - ⚠ Compatible but not tested
+    - ✗ Outside tested range (may break)
+
+    Examples:
+
+        yavs tools check
+    """
+    import subprocess  # nosec B404 - Safe: hardcoded command
+    from rich.table import Table
+    from .utils.scanner_installer import find_trivy_binary
+    from .utils.tool_versions import get_tested_version, get_version_range, is_version_compatible
+
+    print_banner("Validate Scanner Tool Versions")
+    console.print()
+
+    table = Table(title="Tool Version Compatibility", show_header=True, header_style="bold cyan")
+    table.add_column("Tool", style="bold", width=12)
+    table.add_column("Installed", width=15)
+    table.add_column("Tested", width=15)
+    table.add_column("Status", width=40)
+
+    all_compatible = True
+
+    # Check Trivy
+    trivy_path = find_trivy_binary()
+    if trivy_path:
+        try:
+            from .utils.subprocess_runner import run_command
+            returncode, stdout, stderr = run_command(f"{trivy_path} --version", check=False, timeout=5)
+            if returncode == 0:
+                # Parse version
+                trivy_version = None
+                for line in stdout.strip().split('\n'):
+                    if 'Version:' in line or 'version' in line.lower():
+                        parts = line.split()
+                        for part in parts:
+                            if part[0].isdigit():
+                                trivy_version = part
+                                break
+
+                if trivy_version:
+                    tested_ver = get_tested_version("trivy")
+                    is_compat, message = is_version_compatible("trivy", trivy_version)
+
+                    if trivy_version == tested_ver:
+                        status = "[green]✓ Tested version[/green]"
+                    elif is_compat:
+                        status = "[yellow]⚠ Compatible (not tested)[/yellow]"
+                    else:
+                        status = "[red]✗ Outside tested range[/red]"
+                        all_compatible = False
+
+                    table.add_row("Trivy", trivy_version, tested_ver, status)
+                else:
+                    table.add_row("Trivy", "[dim]Unknown[/dim]", get_tested_version("trivy"), "[yellow]⚠ Version unknown[/yellow]")
+        except Exception as e:
+            table.add_row("Trivy", "[red]Error[/red]", get_tested_version("trivy"), f"[red]✗ Check failed: {e}[/red]")
+            all_compatible = False
+    else:
+        table.add_row("Trivy", "[dim]Not installed[/dim]", get_tested_version("trivy"), "[red]✗ Not found[/red]")
+        all_compatible = False
+
+    # Check Python tools
+    python_tools = ["semgrep", "bandit", "checkov"]
+    for tool in python_tools:
+        try:
+            result = subprocess.run(  # nosec B603 - Safe: hardcoded command
+                ["pip", "show", tool],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                installed_version = None
+                for line in result.stdout.split('\n'):
+                    if line.startswith('Version:'):
+                        installed_version = line.split(':', 1)[1].strip()
+                        break
+
+                if installed_version:
+                    tested_ver = get_tested_version(tool)
+                    is_compat, message = is_version_compatible(tool, installed_version)
+
+                    if installed_version == tested_ver:
+                        status = "[green]✓ Tested version[/green]"
+                    elif is_compat:
+                        status = "[yellow]⚠ Compatible (not tested)[/yellow]"
+                    else:
+                        status = "[red]✗ Outside tested range[/red]"
+                        all_compatible = False
+
+                    table.add_row(tool.capitalize(), installed_version, tested_ver, status)
+                else:
+                    table.add_row(tool.capitalize(), "[dim]Unknown[/dim]", get_tested_version(tool), "[yellow]⚠ Version unknown[/yellow]")
+            else:
+                table.add_row(tool.capitalize(), "[dim]Not installed[/dim]", get_tested_version(tool), "[red]✗ Not found[/red]")
+                all_compatible = False
+        except Exception as e:
+            table.add_row(tool.capitalize(), "[red]Error[/red]", get_tested_version(tool), f"[red]✗ Check failed[/red]")
+            all_compatible = False
+
+    console.print(table)
+    console.print()
+
+    if all_compatible:
+        console.print("[bold green]✓ All tools are using tested versions![/bold green]")
+    else:
+        console.print("[bold yellow]⚠ Some tools are not using tested versions[/bold yellow]")
+        console.print()
+        console.print("[dim]Recommendations:[/dim]")
+        console.print("[dim]  • Run 'yavs tools upgrade' to update to tested versions[/dim]")
+        console.print("[dim]  • Or install specific versions with 'yavs tools install --tool <name> --version <ver>'[/dim]")
+
+    console.print()
+    console.print("[dim]Tip: Run 'yavs tools status' to see full version output[/dim]")
 
 
 # ============================================================================

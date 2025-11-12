@@ -10,11 +10,13 @@ from typing import Optional, Tuple
 import requests
 
 from .logging import get_logger
+from .tool_versions import get_tested_version
 
 logger = get_logger(__name__)
 
 # Trivy release information
-TRIVY_VERSION = "0.48.0"
+# Version is now managed in tool_versions.py
+TRIVY_VERSION = get_tested_version("trivy")  # 0.67.2 as of Nov 2025
 TRIVY_GITHUB_RELEASES = "https://github.com/aquasecurity/trivy/releases/download"
 
 # Installation directory
@@ -58,19 +60,23 @@ def get_platform_info() -> Tuple[str, str, str]:
     return os_name, arch, extension
 
 
-def get_trivy_download_url() -> Tuple[str, str]:
+def get_trivy_download_url(version: Optional[str] = None) -> Tuple[str, str]:
     """
     Get Trivy download URL for current platform.
+
+    Args:
+        version: Specific Trivy version to download (default: tested version)
 
     Returns:
         Tuple of (download_url, binary_name)
     """
+    trivy_ver = version or TRIVY_VERSION
     os_name, arch, extension = get_platform_info()
 
     # Construct filename
-    # Example: trivy_0.48.0_macOS-ARM64.tar.gz
-    filename = f"trivy_{TRIVY_VERSION}_{os_name}-{arch}.{extension}"
-    url = f"{TRIVY_GITHUB_RELEASES}/v{TRIVY_VERSION}/{filename}"
+    # Example: trivy_0.67.2_macOS-ARM64.tar.gz
+    filename = f"trivy_{trivy_ver}_{os_name}-{arch}.{extension}"
+    url = f"{TRIVY_GITHUB_RELEASES}/v{trivy_ver}/{filename}"
 
     binary_name = "trivy.exe" if os_name == "Windows" else "trivy"
 
@@ -262,12 +268,13 @@ def extract_archive(archive_path: Path, extract_to: Path, binary_name: str) -> O
         return None
 
 
-def download_and_install_trivy(force: bool = False) -> Optional[Path]:
+def download_and_install_trivy(force: bool = False, version: Optional[str] = None) -> Optional[Path]:
     """
     Download and install Trivy binary.
 
     Args:
         force: Force installation even if already exists
+        version: Specific version to install (default: tested version)
 
     Returns:
         Path to installed binary, or None if failed
@@ -275,6 +282,8 @@ def download_and_install_trivy(force: bool = False) -> Optional[Path]:
     from rich.console import Console
 
     console = Console()
+
+    trivy_ver = version or TRIVY_VERSION
 
     # Check if already installed
     installed_binary = YAVS_BIN_DIR / ("trivy.exe" if platform.system() == "Windows" else "trivy")
@@ -285,15 +294,15 @@ def download_and_install_trivy(force: bool = False) -> Optional[Path]:
 
     # Get download URL
     try:
-        download_url, binary_name = get_trivy_download_url()
+        download_url, binary_name = get_trivy_download_url(trivy_ver)
     except RuntimeError as e:
         console.print(f"[red]✗ {str(e)}[/red]")
         return None
 
     # Download archive
-    archive_path = YAVS_BIN_DIR / f"trivy-{TRIVY_VERSION}.tar.gz"
+    archive_path = YAVS_BIN_DIR / f"trivy-{trivy_ver}.tar.gz"
 
-    console.print(f"[cyan]Downloading Trivy {TRIVY_VERSION}...[/cyan]")
+    console.print(f"[cyan]Downloading Trivy {trivy_ver}...[/cyan]")
 
     if not download_file(download_url, archive_path):
         console.print("[red]✗ Download failed[/red]")

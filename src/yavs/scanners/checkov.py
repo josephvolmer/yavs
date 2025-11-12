@@ -91,11 +91,28 @@ class CheckovScanner(BaseScanner):
         data = self._parse_json_output(output)
         findings = []
 
-        # Checkov wraps results in "results" key
+        # Handle different Checkov output formats
+        # Format 1: {"check_type": "...", "results": {"failed_checks": [...]}}
+        # Format 2: {"passed": 0, "failed": 0, ...} (no results key)
+        # Format 3: Edge case where "results" might be a list
+
+        if not isinstance(data, dict):
+            self.logger.warning(f"Unexpected Checkov output type: {type(data)}")
+            return []
+
+        # Check for format with "results" key
         results = data.get("results", {})
 
-        # We only care about failed checks
-        failed_checks = results.get("failed_checks", [])
+        # Defensive: Handle if results is unexpectedly a list
+        if isinstance(results, list):
+            self.logger.warning("Checkov returned results as list, treating as failed_checks")
+            failed_checks = results
+        elif isinstance(results, dict):
+            # Normal case: results is a dict with failed_checks
+            failed_checks = results.get("failed_checks", [])
+        else:
+            # Format 2: No results key, no findings
+            failed_checks = []
 
         for check in failed_checks:
             # Skip if check is not a dict (defensive programming)

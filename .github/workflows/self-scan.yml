@@ -54,8 +54,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Scanning YAVS source code with YAVS itself..."
-          yavs scan --all \
+          echo "🔍 Scanning YAVS production code (src/) with YAVS itself..."
+          echo "ℹ️  Test fixtures are excluded - they contain intentionally vulnerable code for testing"
+          yavs scan src/ --all \
             --continue-on-error \
             --output-dir self-scan-output
 

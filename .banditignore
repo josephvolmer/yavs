@@ -1,0 +1,12 @@
+# Bandit Ignore Configuration
+# Excludes intentionally vulnerable test fixtures used for testing YAVS scanner capabilities
+
+# Test fixtures directory - contains INTENTIONALLY VULNERABLE code
+# These are documented in tests/fixtures/README.md as "for testing purposes only"
+tests/fixtures/*
+
+# Exclude test files and build artifacts
+*/tests/*
+build/*
+dist/*
+*.egg-info/*

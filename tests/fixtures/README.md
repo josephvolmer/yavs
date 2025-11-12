@@ -211,3 +211,37 @@ These fixtures are designed to:
 - Test multi-language workflows
 
 **Remember**: These are educational tools. Never use vulnerable code patterns in production!
+
+## Scan Exclusions
+
+To prevent these intentionally vulnerable test fixtures from triggering security alerts in production scans, they are excluded via ignore files in the repository root:
+
+### `.trivyignore`
+Excludes test fixtures from Trivy dependency scanning to prevent alerts on:
+- Django 1.11.0 (CVE-2018-14574: SQL injection)
+- PyYAML 3.12 (CVE-2017-18342: arbitrary code execution)
+- jackson-databind 2.9.0 (29 deserialization RCE vulnerabilities)
+- log4j 1.2.17 (deserialization vulnerabilities)
+
+### `.semgrepignore`
+Excludes test fixtures from Semgrep SAST scanning to prevent alerts on intentional code vulnerabilities like SQL injection, command injection, XSS, etc.
+
+### `.banditignore`
+Excludes test fixtures from Bandit Python security analysis to prevent alerts on intentional insecure code patterns.
+
+### Purpose
+These exclusions ensure that:
+1. Production security scans focus only on `src/` code
+2. CI/CD pipelines pass with clean security posture
+3. Test fixtures remain functional for YAVS testing
+4. Security teams can distinguish between intentional test code and real vulnerabilities
+
+### Verifying Production Code Security
+To scan only production code (excluding test fixtures):
+```bash
+# The ignore files automatically exclude tests/fixtures/
+yavs scan . --all --output-dir scan-output
+
+# Or explicitly scan only src/ directory
+yavs scan src/ --all --output-dir scan-output
+```

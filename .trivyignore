@@ -1,0 +1,19 @@
+# Trivy Ignore Configuration
+# Excludes intentionally vulnerable test fixtures used for testing YAVS scanner capabilities
+
+# Test fixtures directory - contains INTENTIONALLY VULNERABLE code
+# These are documented in tests/fixtures/README.md as "for testing purposes only"
+tests/fixtures/**
+
+# Specific test fixture files with known intentional vulnerabilities:
+# - Django 1.11.0 (CVE-2018-14574: SQL injection)
+# - PyYAML 3.12 (CVE-2017-18342: arbitrary code execution)
+# - jackson-databind 2.9.0 (29 deserialization RCE vulnerabilities)
+# - log4j 1.2.17 (deserialization vulnerabilities)
+# - Terraform security groups (intentionally unrestricted for testing)
+
+tests/fixtures/docker_images/requirements.txt
+tests/fixtures/java_project/pom.xml
+tests/fixtures/sample_project/requirements.txt
+tests/fixtures/sample_project/terraform.tf
+tests/fixtures/sample_project/Dockerfile

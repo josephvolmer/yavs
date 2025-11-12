@@ -1,0 +1,176 @@
+name: PR Self-Scan (Baseline Check)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - '.yavs-baseline.yaml'
+      - '.github/workflows/pr-self-scan.yml'
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  self-scan:
+    name: Security Scan with Baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install YAVS
+        run: |
+          pip install -e .
+          echo "✓ YAVS installed"
+
+      - name: Install scanner tools
+        run: |
+          # Install Trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
+
+          # Install Semgrep
+          pip install semgrep
+
+          # Install Bandit
+          pip install bandit
+
+          # Install Checkov
+          pip install checkov
+
+          echo "✓ Scanner tools installed"
+
+      - name: Verify baseline exists
+        run: |
+          if [ ! -f .yavs-baseline.yaml ]; then
+            echo "❌ Baseline file not found!"
+            echo "Please run: yavs scan src/ --all --no-ai -o results.json --continue-on-error"
+            echo "Then: yavs ignore export results.json -o .yavs-baseline.yaml"
+            exit 1
+          fi
+          echo "✓ Baseline file found"
+
+      - name: Scan src/ directory (Current)
+        run: |
+          yavs scan src/ \
+            --all \
+            --no-ai \
+            --continue-on-error \
+            --output-dir current-scan \
+            --quiet
+
+          echo "✓ Current scan complete"
+
+      - name: Compare with baseline using diff
+        id: diff
+        run: |
+          # Create empty baseline scan if baseline has no findings
+          if [ ! -f baseline-scan.json ]; then
+            echo '{"findings":[],"summary":{"total":0,"by_severity":{"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0,"INFO":0}}}' > baseline-scan.json
+          fi
+
+          # Run diff command
+          yavs diff baseline-scan.json current-scan/yavs-results.json --show-all -o diff-report.json || true
+
+          # Check if new findings exist
+          if [ -f diff-report.json ]; then
+            NEW_FINDINGS=$(jq -r '.new_findings // [] | length' diff-report.json)
+            CRITICAL=$(jq -r '.new_findings // [] | map(select(.severity == "CRITICAL")) | length' diff-report.json)
+            HIGH=$(jq -r '.new_findings // [] | map(select(.severity == "HIGH")) | length' diff-report.json)
+
+            echo "new_findings=$NEW_FINDINGS" >> $GITHUB_OUTPUT
+            echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+
+            if [ "$NEW_FINDINGS" -gt 0 ]; then
+              echo "⚠️ Found $NEW_FINDINGS new finding(s) compared to baseline"
+              echo "   CRITICAL: $CRITICAL"
+              echo "   HIGH: $HIGH"
+            else
+              echo "✅ No new findings - PR is clean!"
+            fi
+          else
+            echo "new_findings=0" >> $GITHUB_OUTPUT
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "✅ No new findings - PR is clean!"
+          fi
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: current-scan/yavs-results.sarif
+          category: yavs-self-scan
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yavs-pr-scan-results
+          path: |
+            current-scan/
+            diff-report.json
+            baseline-scan.json
+          retention-days: 30
+
+      - name: Comment on PR with results
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const newFindings = '${{ steps.diff.outputs.new_findings }}';
+            const critical = '${{ steps.diff.outputs.critical }}';
+            const high = '${{ steps.diff.outputs.high }}';
+
+            let comment = '## 🔒 YAVS Security Scan Results\n\n';
+
+            if (newFindings === '0') {
+              comment += '✅ **No new security findings detected**\n\n';
+              comment += 'This PR does not introduce any new security issues compared to the baseline.\n';
+            } else {
+              comment += `⚠️ **${newFindings} new security finding(s) detected**\n\n`;
+              comment += `- **CRITICAL:** ${critical}\n`;
+              comment += `- **HIGH:** ${high}\n\n`;
+              comment += '**Action Required:** Review the findings in the Security tab or download the artifacts.\n';
+            }
+
+            comment += '\n---\n';
+            comment += '_Scan powered by [YAVS](https://github.com/YAVS-OSS/yavs) using baseline comparison_\n';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.name,
+              body: comment
+            });
+
+      - name: Fail if new findings detected
+        if: steps.diff.outputs.new_findings != '0'
+        run: |
+          echo "❌ PR BLOCKED: New security findings detected"
+          echo ""
+          echo "New findings: ${{ steps.diff.outputs.new_findings }}"
+          echo "  CRITICAL: ${{ steps.diff.outputs.critical }}"
+          echo "  HIGH: ${{ steps.diff.outputs.high }}"
+          echo ""
+          echo "To proceed:"
+          echo "1. Fix the security issues in your code"
+          echo "2. OR add suppressions to .yavs-baseline.yaml if they are false positives"
+          echo ""
+          echo "See artifacts for detailed findings report"
+          exit 1

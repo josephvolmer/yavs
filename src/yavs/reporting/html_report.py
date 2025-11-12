@@ -313,7 +313,7 @@ class HTMLReportGenerator:
         # Load and normalize data
         data = self.load_data(scan_results_path, summary_path)
 
-        # Load SBOM contents if available
+        # Load SBOM contents if available and embed in HTML
         if 'sbom' in data and data['sbom']:
             sbom_contents = self._load_sbom_file(data['sbom'], scan_results_path)
             if sbom_contents:

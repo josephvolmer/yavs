@@ -441,10 +441,6 @@ def scan(
     if all_scanners:
         sast = sbom = compliance = True
 
-    # Structured format always includes SBOM (it's part of the structured format)
-    if use_structured:
-        sbom = True
-
     if not any([sast, sbom, compliance]):
         console.print("[yellow]No scanners specified. Use --all or specify --sbom, --sast, or --compliance[/yellow]")
         raise typer.Exit(2)  # Exit code 2 for configuration errors

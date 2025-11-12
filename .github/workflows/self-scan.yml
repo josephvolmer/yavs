@@ -57,24 +57,51 @@ jobs:
           echo "🔍 Scanning YAVS source code with YAVS itself..."
           yavs scan --all \
             --continue-on-error \
-            --flat \
-            --json self-scan-results.json \
-            --sarif self-scan-results.sarif
+            --output-dir self-scan-output
+
+      - name: Generate additional outputs
+        if: always()
+        continue-on-error: true
+        run: |
+          # Generate HTML report
+          yavs report self-scan-output/yavs-results.json -o self-scan-output/report.html || true
+
+          # Generate stats by severity
+          yavs stats self-scan-output/yavs-results.json --by-severity > self-scan-output/stats-severity.txt || true
+
+          # Generate stats by scanner
+          yavs stats self-scan-output/yavs-results.json --by-scanner > self-scan-output/stats-scanner.txt || true
+
+          # Summary stats
+          yavs stats self-scan-output/yavs-results.json --summary > self-scan-output/stats-summary.txt || true
 
       - name: Check our own security posture
         id: self-check
         if: always()
         run: |
-          if [ ! -f self-scan-results.json ]; then
+          if [ ! -f self-scan-output/yavs-results.json ]; then
             echo "⚠️ Scan results not found, using zero values"
             TOTAL=0
             CRITICAL=0
             HIGH=0
           else
-            # Flat format has findings in .data array, not at root
-            CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' self-scan-results.json)
-            HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' self-scan-results.json)
-            TOTAL=$(jq '.data | length' self-scan-results.json)
+            # Check for structured format (has category keys)
+            if jq -e '.sast or .sbom or .compliance' self-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format
+              CRITICAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="CRITICAL")) | length' self-scan-output/yavs-results.json)
+              HIGH=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="HIGH")) | length' self-scan-output/yavs-results.json)
+              TOTAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | length' self-scan-output/yavs-results.json)
+            elif jq -e '.data' self-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' self-scan-output/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' self-scan-output/yavs-results.json)
+              TOTAL=$(jq '.data | length' self-scan-output/yavs-results.json)
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+            fi
           fi
 
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
@@ -97,7 +124,7 @@ jobs:
         if: always()
         continue-on-error: true
         with:
-          sarif_file: self-scan-results.sarif
+          sarif_file: self-scan-output/yavs-results.sarif
           category: yavs-self-scan
 
       - name: Generate quality report
@@ -133,8 +160,11 @@ jobs:
         with:
           name: yavs-self-scan-${{ github.sha }}
           path: |
-            self-scan-results.json
-            self-scan-results.sarif
+            self-scan-output/yavs-results.json
+            self-scan-output/yavs-results.sarif
+            self-scan-output/sbom.json
+            self-scan-output/report.html
+            self-scan-output/stats-*.txt
             self-scan-report.md
 
       - name: Report critical issues in our own code

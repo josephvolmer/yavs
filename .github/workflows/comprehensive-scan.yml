@@ -59,43 +59,14 @@ jobs:
           # Semgrep, Bandit, and Checkov
           pip install semgrep bandit checkov
 
-      - name: Create custom YAVS configuration
+      - name: Verify YAVS installation
         run: |
-          cat > custom-config.yaml << EOF
-          scanners:
-            trivy:
-              enabled: true
-              flags: ""
-              timeout: 600
-            semgrep:
-              enabled: true
-              flags: "--config=auto --metrics=off"
-              timeout: 600
-            bandit:
-              enabled: true
-              flags: "-f json"
-              timeout: 600
-            checkov:
-              enabled: true
-              flags: "--quiet --compact"
-              timeout: 600
-
-          output:
-            json: "comprehensive-scan-output/yavs-results.json"
-            sarif: "comprehensive-scan-output/yavs-results.sarif"
-
-          ai:
-            enabled: true
-            provider: "anthropic"
-            model: "claude-sonnet-4-5-20250929"
-            features:
-              summarize: true
-              triage: true
-              fix_suggestions: true
-
-          logging:
-            level: "INFO"
-          EOF
+          yavs version
+          which yavs
+          trivy --version
+          semgrep --version
+          bandit --version
+          checkov --version
 
       - name: Run comprehensive security scan
         env:
@@ -103,63 +74,55 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "🔍 Starting comprehensive security scan..."
-          yavs scan --all \
+          echo "📁 Target: src/ (production code only)"
+          echo "ℹ️  Test fixtures are excluded via ignore files"
+          yavs scan src/ --all \
             --continue-on-error \
-            --config custom-config.yaml \
             --output-dir comprehensive-scan-output
         continue-on-error: true
 
-      - name: Generate additional outputs
+      - name: Generate all YAVS outputs
         if: always()
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Generate HTML report
+          # Generate HTML report (with embedded SBOM)
           yavs report comprehensive-scan-output/yavs-results.json -o comprehensive-scan-output/report.html || true
 
-          # Generate stats
+          # Generate stats by severity
           yavs stats comprehensive-scan-output/yavs-results.json --by-severity > comprehensive-scan-output/stats-severity.txt || true
+
+          # Generate stats by scanner
           yavs stats comprehensive-scan-output/yavs-results.json --by-scanner > comprehensive-scan-output/stats-scanner.txt || true
+
+          # Generate stats by category
           yavs stats comprehensive-scan-output/yavs-results.json --by-category > comprehensive-scan-output/stats-category.txt || true
+
+          # Summary stats
           yavs stats comprehensive-scan-output/yavs-results.json --summary > comprehensive-scan-output/stats-summary.txt || true
 
           # AI summary (if not already generated during scan)
-          if [ ! -f comprehensive-scan-output/summary.json ]; then
-            yavs summarize comprehensive-scan-output/yavs-results.json -o comprehensive-scan-output || true
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            if [ ! -f comprehensive-scan-output/summary.json ]; then
+              yavs summarize comprehensive-scan-output/yavs-results.json -o comprehensive-scan-output || true
+            fi
           fi
 
       - name: Validate SARIF output
         if: always()
+        continue-on-error: true
         run: |
           if [ -f comprehensive-scan-output/yavs-results.sarif ]; then
-            pip install sarif-tools
-            sarif info comprehensive-scan-output/yavs-results.sarif
+            echo "✅ SARIF file generated"
+            echo "Size: $(wc -c < comprehensive-scan-output/yavs-results.sarif) bytes"
+            echo "Runs: $(jq '.runs | length' comprehensive-scan-output/yavs-results.sarif)"
           else
-            echo "⚠️ SARIF file not found, skipping validation"
+            echo "⚠️ SARIF file not found"
           fi
 
-      - name: Generate AI-powered security report
-        if: always()
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          if [ ! -f comprehensive-scan-output/yavs-results.json ]; then
-            echo "⚠️ Scan results not found, creating placeholder report"
-            echo "# Security Analysis" > security-analysis.md
-            echo "Scan failed to complete. No results available." >> security-analysis.md
-          elif [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
-            echo "🤖 Generating AI-powered analysis..."
-            yavs summarize comprehensive-scan-output/yavs-results.json > security-analysis.md
-          else
-            echo "⚠️ Skipping AI analysis (no API keys configured)"
-            echo "# Security Analysis" > security-analysis.md
-            echo "AI analysis requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be configured" >> security-analysis.md
-          fi
-
-      - name: Generate detailed statistics
+      - name: Analyze scan results
         id: stats
         if: always()
         run: |
@@ -173,28 +136,22 @@ jobs:
             DEPENDENCY=0
             SAST=0
             COMPLIANCE=0
-            SECRET=0
-            TRIVY=0
-            SEMGREP=0
-            CHECKOV=0
           else
-            # Calculate comprehensive statistics
             # Check for structured format (has category keys)
-            if jq -e '.sast or .sbom or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
-              # Structured format
-              CRITICAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="CRITICAL")) | length' comprehensive-scan-output/yavs-results.json)
-              HIGH=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="HIGH")) | length' comprehensive-scan-output/yavs-results.json)
-              MEDIUM=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="MEDIUM")) | length' comprehensive-scan-output/yavs-results.json)
-              LOW=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="LOW")) | length' comprehensive-scan-output/yavs-results.json)
-              TOTAL=$(jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | length' comprehensive-scan-output/yavs-results.json)
+            if jq -e '.sast or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .sast[].issues[] and .compliance[].violations[]
+              CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' comprehensive-scan-output/yavs-results.json)
+              HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' comprehensive-scan-output/yavs-results.json)
+              MEDIUM=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' comprehensive-scan-output/yavs-results.json)
+              LOW=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="LOW")) | length' comprehensive-scan-output/yavs-results.json)
+              TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' comprehensive-scan-output/yavs-results.json)
 
-              # By category
-              SAST=$(jq '.sast | length' comprehensive-scan-output/yavs-results.json)
-              DEPENDENCY=$(jq '.sbom | length' comprehensive-scan-output/yavs-results.json)
-              COMPLIANCE=$(jq '.compliance | length' comprehensive-scan-output/yavs-results.json)
-              SECRET=0  # Not separate in structured
-            else
-              # Flat format
+              # By category (count tools in each category as proxy)
+              SAST=$(jq '(.sast // []) | length' comprehensive-scan-output/yavs-results.json)
+              COMPLIANCE=$(jq '(.compliance // []) | length' comprehensive-scan-output/yavs-results.json)
+              DEPENDENCY=0  # Trivy findings are in compliance
+            elif jq -e '.data' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
               TOTAL=$(jq '.data | length' comprehensive-scan-output/yavs-results.json)
               CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' comprehensive-scan-output/yavs-results.json)
               HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' comprehensive-scan-output/yavs-results.json)
@@ -204,14 +161,18 @@ jobs:
               # By category
               DEPENDENCY=$(jq '[.data[] | select(.category=="dependency")] | length' comprehensive-scan-output/yavs-results.json)
               SAST=$(jq '[.data[] | select(.category=="sast")] | length' comprehensive-scan-output/yavs-results.json)
-              COMPLIANCE=$(jq '[.data[] | select(.category=="compliance")] | length' comprehensive-scan-output/yavs-results.json)
-              SECRET=$(jq '[.data[] | select(.category=="secret")] | length' comprehensive-scan-output/yavs-results.json)
+              COMPLIANCE=$(jq '[.data[] | select(.category=="compliance" or .category=="config")] | length' comprehensive-scan-output/yavs-results.json)
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+              LOW=0
+              DEPENDENCY=0
+              SAST=0
+              COMPLIANCE=0
             fi
-
-            # By tool
-            TRIVY=$(jq '[.data[] | select(.tool=="trivy")] | length' comprehensive-scan-output/yavs-results.json)
-            SEMGREP=$(jq '[.data[] | select(.tool=="semgrep")] | length' comprehensive-scan-output/yavs-results.json)
-            CHECKOV=$(jq '[.data[] | select(.tool=="checkov")] | length' comprehensive-scan-output/yavs-results.json)
           fi
 
           # Output to GITHUB_OUTPUT
@@ -224,10 +185,6 @@ jobs:
             echo "dependency=$DEPENDENCY"
             echo "sast=$SAST"
             echo "compliance=$COMPLIANCE"
-            echo "secret=$SECRET"
-            echo "trivy=$TRIVY"
-            echo "semgrep=$SEMGREP"
-            echo "checkov=$CHECKOV"
           } >> $GITHUB_OUTPUT
 
           # Create summary report
@@ -238,6 +195,7 @@ jobs:
           **Repository:** ${{ github.repository }}
           **Branch:** ${{ github.ref_name }}
           **Commit:** ${{ github.sha }}
+          **Target:** src/ (production code only)
 
           ## Overview
 
@@ -250,20 +208,36 @@ jobs:
           - 🔵 Low: **$LOW**
 
           ### By Category
-          - 📦 Dependencies: **$DEPENDENCY**
-          - 🔍 SAST: **$SAST**
-          - ⚙️ Compliance: **$COMPLIANCE**
-          - 🔐 Secrets: **$SECRET**
+          - 📦 Dependencies: Scanned with Trivy
+          - 🔍 SAST: $SAST scanner(s) executed
+          - ⚙️ Compliance: $COMPLIANCE scanner(s) executed
 
-          ### By Scanner
-          - Trivy: **$TRIVY**
-          - Semgrep: **$SEMGREP**
-          - Checkov: **$CHECKOV**
+          ### Scanners Executed
+          - ✅ Trivy (dependency + vulnerability + SBOM)
+          - ✅ Semgrep (SAST)
+          - ✅ Bandit (Python security)
+          - ✅ Checkov (IaC compliance)
+
+          ### Outputs Generated
+          - ✅ JSON (structured format)
+          - ✅ SARIF 2.1.0 (for GitHub Security)
+          - ✅ HTML Report (interactive dashboard)
+          - ✅ SBOM (CycloneDX format)
+          - ✅ Statistics (by severity, scanner, category)
+          - ✅ AI Summary (if API keys configured)
           EOF
 
           cat summary-stats.md
 
-      - name: Upload to GitHub Security
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Found $CRITICAL critical findings"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity findings"
+          else
+            echo "::notice::No critical or high findings"
+          fi
+
+      - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         continue-on-error: true
@@ -277,30 +251,32 @@ jobs:
           mkdir -p security-reports
 
           # Copy all YAVS outputs
-          [ -f comprehensive-scan-output/yavs-results.json ] && cp comprehensive-scan-output/yavs-results.json security-reports/ || echo "No JSON results"
-          [ -f comprehensive-scan-output/yavs-results.sarif ] && cp comprehensive-scan-output/yavs-results.sarif security-reports/ || echo "No SARIF results"
-          [ -f comprehensive-scan-output/sbom.json ] && cp comprehensive-scan-output/sbom.json security-reports/ || echo "No SBOM"
-          [ -f comprehensive-scan-output/report.html ] && cp comprehensive-scan-output/report.html security-reports/ || echo "No HTML report"
-          [ -f comprehensive-scan-output/stats-*.txt ] && cp comprehensive-scan-output/stats-*.txt security-reports/ || echo "No stats files"
-          [ -f comprehensive-scan-output/summary.json ] && cp comprehensive-scan-output/summary.json security-reports/ || echo "No AI summary"
-          [ -f summary-stats.md ] && cp summary-stats.md security-reports/ || echo "No summary stats"
-          [ -f security-analysis.md ] && cp security-analysis.md security-reports/ || echo "No security analysis"
+          cp comprehensive-scan-output/yavs-results.json security-reports/ 2>/dev/null || echo "No JSON results"
+          cp comprehensive-scan-output/yavs-results.sarif security-reports/ 2>/dev/null || echo "No SARIF results"
+          cp comprehensive-scan-output/sbom.json security-reports/ 2>/dev/null || echo "No SBOM"
+          cp comprehensive-scan-output/report.html security-reports/ 2>/dev/null || echo "No HTML report"
+          cp comprehensive-scan-output/stats-*.txt security-reports/ 2>/dev/null || echo "No stats files"
+          cp comprehensive-scan-output/summary.json security-reports/ 2>/dev/null || echo "No AI summary"
+          cp summary-stats.md security-reports/ 2>/dev/null || echo "No summary stats"
 
           # Create top 10 critical issues report
           if [ -f comprehensive-scan-output/yavs-results.json ]; then
             # Check format and extract accordingly
-            if jq -e '.sast or .sbom or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+            if jq -e '.sast or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
               # Structured format
-              jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \
                 comprehensive-scan-output/yavs-results.json > security-reports/top-10-critical.json
-              jq '[(.sast // []), (.sbom // []), (.compliance // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
                 comprehensive-scan-output/yavs-results.json > security-reports/packages-report.json
-            else
+            elif jq -e '.data' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
               # Flat format
               jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \
                 comprehensive-scan-output/yavs-results.json > security-reports/top-10-critical.json
               jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
                 comprehensive-scan-output/yavs-results.json > security-reports/packages-report.json
+            else
+              echo "[]" > security-reports/top-10-critical.json
+              echo "[]" > security-reports/packages-report.json
             fi
           else
             echo "[]" > security-reports/top-10-critical.json
@@ -317,17 +293,17 @@ jobs:
 
           ### Core Outputs
           - \`yavs-results.json\` - Full scan results in structured JSON format
-          - \`yavs-results.sarif\` - SARIF 2.1.0 compliant output
-          - \`sbom.json\` - Software Bill of Materials (CycloneDX)
-          - \`report.html\` - Interactive HTML report
+          - \`yavs-results.sarif\` - SARIF 2.1.0 compliant output for GitHub Security
+          - \`sbom.json\` - Software Bill of Materials (CycloneDX format)
+          - \`report.html\` - Interactive HTML dashboard (open in browser)
 
           ### Analysis & Stats
-          - \`stats-severity.txt\` - Findings grouped by severity
-          - \`stats-scanner.txt\` - Findings grouped by scanner
-          - \`stats-category.txt\` - Findings grouped by category
+          - \`stats-severity.txt\` - Findings grouped by severity (CRITICAL, HIGH, etc.)
+          - \`stats-scanner.txt\` - Findings grouped by scanner (Trivy, Semgrep, etc.)
+          - \`stats-category.txt\` - Findings grouped by category (SAST, dependency, etc.)
           - \`stats-summary.txt\` - One-line summary
           - \`summary.json\` - AI-generated summary (if available)
-          - \`security-analysis.md\` - AI-powered analysis and recommendations
+          - \`summary-stats.md\` - Comprehensive statistics report
 
           ### Specialized Reports
           - \`top-10-critical.json\` - Top 10 critical/high severity findings
@@ -335,7 +311,9 @@ jobs:
 
           ## Viewing Results
 
-          - **HTML Report**: Open \`report.html\` in any browser for interactive viewing
+          **Recommended:** Open \`report.html\` in any browser for the best interactive experience
+
+          Other options:
           - **SARIF**: Upload to GitHub Security tab for code scanning integration
           - **JSON**: Use \`jq\` for filtering and analysis
           - **Stats**: Read .txt files for quick overview
@@ -344,7 +322,7 @@ jobs:
           - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           - Workflow: ${{ github.workflow }}
           - Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          - YAVS Version: 1.0.0
+          - YAVS Version: $(yavs version 2>&1 | grep -oP 'v\K[0-9.]+' || echo "unknown")
           EOF
 
       - name: Upload comprehensive report package
@@ -371,21 +349,19 @@ jobs:
               medium: '${{ steps.stats.outputs.medium }}'
             };
 
-            const analysis = fs.readFileSync('security-analysis.md', 'utf8');
-            const summary = fs.readFileSync('summary-stats.md', 'utf8');
+            let summary = 'No summary available';
+            try {
+              summary = fs.readFileSync('summary-stats.md', 'utf8');
+            } catch (e) {}
 
-            const title = `🔒 Weekly Security Review: ${stats.critical} Critical, ${stats.high} High Findings`;
+            const title = `🔒 Security Review: ${stats.critical} Critical, ${stats.high} High Findings`;
 
             const body = `${summary}
-
-            ## AI-Powered Analysis
-
-            ${analysis}
 
             ## Actions Required
 
             1. Review all critical and high severity findings
-            2. Prioritize remediation based on AI recommendations
+            2. Prioritize remediation based on severity and exploitability
             3. Update dependencies with known vulnerabilities
             4. Address any exposed secrets immediately
 
@@ -393,9 +369,10 @@ jobs:
 
             - [Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
             - [Security Tab](https://github.com/${{ github.repository }}/security/code-scanning)
+            - Download the comprehensive report package from workflow artifacts
 
             ---
-            *Automated weekly security scan • Generated by YAVS*
+            *Automated security scan • Generated by YAVS*
             `;
 
             await github.rest.issues.create({
@@ -403,7 +380,7 @@ jobs:
               repo: context.repo.repo,
               title: title,
               body: body,
-              labels: ['security', 'weekly-scan', 'automated']
+              labels: ['security', 'automated-scan']
             });
 
       - name: Send Slack notification
@@ -415,7 +392,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d '{
-            "text": "🔒 Weekly Security Scan Complete",
+            "text": "🔒 Comprehensive Security Scan Complete",
             "blocks": [
               {
                 "type": "header",

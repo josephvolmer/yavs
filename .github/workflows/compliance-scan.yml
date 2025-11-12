@@ -8,7 +8,7 @@ on:
 
 jobs:
   compliance-scan:
-    name: Compliance Scan
+    name: Compliance & IaC Scan
     runs-on: ubuntu-latest
 
     permissions:
@@ -29,32 +29,147 @@ jobs:
           pip install -e .
           pip install checkov
 
+      - name: Verify YAVS installation
+        run: |
+          yavs version
+          which yavs
+          checkov --version
+
       - name: Run compliance scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          yavs scan --compliance \
+          echo "🔍 Running compliance scan on production code (src/)..."
+          echo "⚙️  Scanning IaC, Dockerfiles, and configuration files"
+          yavs scan src/ --compliance \
             --continue-on-error \
-            --flat \
-            --json compliance-results.json \
-            --sarif compliance-results.sarif
+            --output-dir compliance-output
         continue-on-error: true
 
-      - name: Upload SARIF
+      - name: Generate additional outputs
+        if: always()
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Generate HTML report
+          yavs report compliance-output/yavs-results.json -o compliance-output/report.html || true
+
+          # Generate stats by severity
+          yavs stats compliance-output/yavs-results.json --by-severity > compliance-output/stats-severity.txt || true
+
+          # Generate stats by scanner
+          yavs stats compliance-output/yavs-results.json --by-scanner > compliance-output/stats-scanner.txt || true
+
+          # Generate stats by category
+          yavs stats compliance-output/yavs-results.json --by-category > compliance-output/stats-category.txt || true
+
+          # Summary stats
+          yavs stats compliance-output/yavs-results.json --summary > compliance-output/stats-summary.txt || true
+
+          # Generate AI summary if available
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            yavs summarize compliance-output/yavs-results.json -o compliance-output || true
+          fi
+
+      - name: Analyze results
+        id: analyze
+        if: always()
+        run: |
+          if [ ! -f compliance-output/yavs-results.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            TOTAL=0
+            CRITICAL=0
+            HIGH=0
+            MEDIUM=0
+          else
+            # Check for structured format (has category keys)
+            if jq -e '.sast or .compliance' compliance-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .compliance[].violations[]
+              CRITICAL=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' compliance-output/yavs-results.json)
+              HIGH=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' compliance-output/yavs-results.json)
+              MEDIUM=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' compliance-output/yavs-results.json)
+              TOTAL=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | length' compliance-output/yavs-results.json)
+            elif jq -e '.data' compliance-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' compliance-output/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' compliance-output/yavs-results.json)
+              MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' compliance-output/yavs-results.json)
+              TOTAL=$(jq '.data | length' compliance-output/yavs-results.json)
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+            fi
+          fi
+
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Found $CRITICAL critical compliance findings"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity compliance findings"
+          else
+            echo "::notice::No critical or high compliance findings"
+          fi
+
+      - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         continue-on-error: true
         with:
-          sarif_file: compliance-results.sarif
+          sarif_file: compliance-output/yavs-results.sarif
           category: yavs-compliance-scan
 
-      - name: Upload results
+      - name: Upload compliance scan results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compliance-scan-results
+          name: compliance-scan-results-${{ github.sha }}
           path: |
-            compliance-results.json
-            compliance-results.sarif
+            compliance-output/yavs-results.json
+            compliance-output/yavs-results.sarif
+            compliance-output/report.html
+            compliance-output/stats-*.txt
+            compliance-output/summary.json
           retention-days: 30
+
+      - name: Post job summary
+        if: always()
+        run: |
+          cat > compliance-summary.md << EOF
+          # Compliance Scan Results
+
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Target:** src/ (production code only)
+
+          ## Results
+
+          - Total findings: ${{ steps.analyze.outputs.total }}
+          - Critical: ${{ steps.analyze.outputs.critical }}
+          - High: ${{ steps.analyze.outputs.high }}
+          - Medium: ${{ steps.analyze.outputs.medium }}
+
+          ## Scanner Used
+
+          - ✅ Checkov (IaC, Dockerfile, K8s compliance)
+
+          ## Files Scanned
+
+          Checkov scans:
+          - Infrastructure as Code (Terraform, CloudFormation, ARM, etc.)
+          - Dockerfiles
+          - Kubernetes manifests
+          - GitHub Actions workflows
+          - Configuration files
+
+          EOF
+
+          cat compliance-summary.md >> $GITHUB_STEP_SUMMARY

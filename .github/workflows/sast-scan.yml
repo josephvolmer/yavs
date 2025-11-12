@@ -1,14 +1,14 @@
 name: SAST Scan
 
 # Static application security testing
-# Scans source code for security vulnerabilities
+# Scans source code for security vulnerabilities using Semgrep and Bandit
 
 on:
   workflow_dispatch:
 
 jobs:
   sast-scan:
-    name: SAST Scan
+    name: SAST Security Scan
     runs-on: ubuntu-latest
 
     permissions:
@@ -29,32 +29,132 @@ jobs:
           pip install -e .
           pip install semgrep bandit
 
+      - name: Verify YAVS installation
+        run: |
+          yavs version
+          which yavs
+
       - name: Run SAST scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          yavs scan --sast \
+          echo "🔍 Running SAST scan on production code (src/)..."
+          echo "ℹ️  Test fixtures are excluded via ignore files"
+          yavs scan src/ --sast \
             --continue-on-error \
-            --flat \
-            --json sast-results.json \
-            --sarif sast-results.sarif
+            --output-dir sast-output
         continue-on-error: true
 
-      - name: Upload SARIF
+      - name: Generate additional outputs
+        if: always()
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Generate HTML report
+          yavs report sast-output/yavs-results.json -o sast-output/report.html || true
+
+          # Generate stats by severity
+          yavs stats sast-output/yavs-results.json --by-severity > sast-output/stats-severity.txt || true
+
+          # Generate stats by scanner
+          yavs stats sast-output/yavs-results.json --by-scanner > sast-output/stats-scanner.txt || true
+
+          # Generate stats by category
+          yavs stats sast-output/yavs-results.json --by-category > sast-output/stats-category.txt || true
+
+          # Summary stats
+          yavs stats sast-output/yavs-results.json --summary > sast-output/stats-summary.txt || true
+
+      - name: Analyze results
+        id: analyze
+        if: always()
+        run: |
+          if [ ! -f sast-output/yavs-results.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            TOTAL=0
+            CRITICAL=0
+            HIGH=0
+            MEDIUM=0
+          else
+            # Check for structured format (has category keys)
+            if jq -e '.sast or .compliance' sast-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .sast[].issues[]
+              CRITICAL=$(jq '[(.sast // [] | .[] | .issues // [])] | flatten | map(select(.severity=="CRITICAL")) | length' sast-output/yavs-results.json)
+              HIGH=$(jq '[(.sast // [] | .[] | .issues // [])] | flatten | map(select(.severity=="HIGH")) | length' sast-output/yavs-results.json)
+              MEDIUM=$(jq '[(.sast // [] | .[] | .issues // [])] | flatten | map(select(.severity=="MEDIUM")) | length' sast-output/yavs-results.json)
+              TOTAL=$(jq '[(.sast // [] | .[] | .issues // [])] | flatten | length' sast-output/yavs-results.json)
+            elif jq -e '.data' sast-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' sast-output/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' sast-output/yavs-results.json)
+              MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' sast-output/yavs-results.json)
+              TOTAL=$(jq '.data | length' sast-output/yavs-results.json)
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+            fi
+          fi
+
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Found $CRITICAL critical SAST findings"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity SAST findings"
+          else
+            echo "::notice::No critical or high SAST findings"
+          fi
+
+      - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         continue-on-error: true
         with:
-          sarif_file: sast-results.sarif
+          sarif_file: sast-output/yavs-results.sarif
           category: yavs-sast-scan
 
-      - name: Upload results
+      - name: Upload SAST results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sast-scan-results
+          name: sast-scan-results-${{ github.sha }}
           path: |
-            sast-results.json
-            sast-results.sarif
+            sast-output/yavs-results.json
+            sast-output/yavs-results.sarif
+            sast-output/report.html
+            sast-output/stats-*.txt
           retention-days: 30
+
+      - name: Post job summary
+        if: always()
+        run: |
+          cat > sast-summary.md << EOF
+          # SAST Scan Results
+
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Target:** src/ (production code only)
+
+          ## Results
+
+          - Total findings: ${{ steps.analyze.outputs.total }}
+          - Critical: ${{ steps.analyze.outputs.critical }}
+          - High: ${{ steps.analyze.outputs.high }}
+          - Medium: ${{ steps.analyze.outputs.medium }}
+
+          ## Scanners Used
+
+          - ✅ Semgrep (SAST rules)
+          - ✅ Bandit (Python security)
+
+          EOF
+
+          cat sast-summary.md >> $GITHUB_STEP_SUMMARY

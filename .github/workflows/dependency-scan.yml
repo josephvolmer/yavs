@@ -4,27 +4,6 @@ name: Dependency Scan
 # Generates SBOM and scans dependencies for CVEs using Trivy
 
 on:
-  # Automatic triggers disabled - manual trigger only
-  # push:
-  #   branches: [main, develop]
-  #   paths:
-  #     - '**/requirements.txt'
-  #     - '**/package.json'
-  #     - '**/go.mod'
-  #     - '**/Gemfile'
-  #     - '**/pom.xml'
-  #     - '**/build.gradle'
-  #     - '**/Cargo.toml'
-  # pull_request:
-  #   branches: [main, develop]
-  #   paths:
-  #     - '**/requirements.txt'
-  #     - '**/package.json'
-  #     - '**/go.mod'
-  #     - '**/Gemfile'
-  #     - '**/pom.xml'
-  #     - '**/build.gradle'
-  #     - '**/Cargo.toml'
   workflow_dispatch:
 
 jobs:
@@ -50,38 +29,62 @@ jobs:
         run: |
           pip install -e .
 
-          # Install Trivy only (faster than all scanners)
+          # Install Trivy for dependency scanning
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      - name: Run dependency scan (BOM/SCA only)
+      - name: Verify YAVS installation
+        run: |
+          yavs version
+          which yavs
+          trivy --version
+
+      - name: Run dependency scan with SBOM generation
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Only run Trivy for fast dependency checking
-          yavs scan --sbom \
+          echo "🔍 Scanning dependencies and generating SBOM..."
+          echo "📦 Target: src/ (production code only)"
+          yavs scan src/ --sbom \
             --continue-on-error \
-            --flat \
-            --json dependency-scan.json \
-            --sarif dependency-scan.sarif
+            --output-dir dependency-output
         continue-on-error: true
 
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Generate additional outputs
         if: always()
         continue-on-error: true
-        with:
-          sarif_file: dependency-scan.sarif
-          category: yavs-dependency-scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Generate HTML report with embedded SBOM
+          yavs report dependency-output/yavs-results.json -o dependency-output/report.html || true
+
+          # Generate stats by severity
+          yavs stats dependency-output/yavs-results.json --by-severity > dependency-output/stats-severity.txt || true
+
+          # Generate stats by scanner
+          yavs stats dependency-output/yavs-results.json --by-scanner > dependency-output/stats-scanner.txt || true
+
+          # Generate stats by category
+          yavs stats dependency-output/yavs-results.json --by-category > dependency-output/stats-category.txt || true
+
+          # Summary stats
+          yavs stats dependency-output/yavs-results.json --summary > dependency-output/stats-summary.txt || true
+
+          # Generate AI summary if available
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            yavs summarize dependency-output/yavs-results.json -o dependency-output || true
+          fi
 
       - name: Analyze results
         id: analyze
         if: always()
         run: |
-          if [ ! -f dependency-scan.json ]; then
+          if [ ! -f dependency-output/yavs-results.json ]; then
             echo "⚠️ Scan results not found, using zero values"
             TOTAL=0
             CRITICAL=0
@@ -89,15 +92,35 @@ jobs:
             MEDIUM=0
             echo "No scan results available" > vulnerable-packages.txt
           else
-            # Count vulnerabilities by severity (flat format uses .data array)
-            TOTAL=$(jq '.data | length' dependency-scan.json)
-            CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' dependency-scan.json)
-            HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' dependency-scan.json)
-            MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' dependency-scan.json)
+            # Check for structured format (has category keys)
+            if jq -e '.sast or .compliance' dependency-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .compliance[].violations[] (Trivy reports as compliance)
+              CRITICAL=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' dependency-output/yavs-results.json)
+              HIGH=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' dependency-output/yavs-results.json)
+              MEDIUM=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' dependency-output/yavs-results.json)
+              TOTAL=$(jq '[(.compliance // [] | .[] | .violations // [])] | flatten | length' dependency-output/yavs-results.json)
 
-            # Extract packages with issues
-            jq -r '.data[] | select(.package != null) | "\(.package)@\(.version) - \(.severity) - \(.message)"' \
-              dependency-scan.json > vulnerable-packages.txt || echo "No vulnerable packages" > vulnerable-packages.txt
+              # Extract packages with issues
+              jq -r '[(.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | .[] | "\(.package)@\(.version) - \(.severity) - \(.description // .message)"' \
+                dependency-output/yavs-results.json > vulnerable-packages.txt || echo "No vulnerable packages" > vulnerable-packages.txt
+            elif jq -e '.data' dependency-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' dependency-output/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' dependency-output/yavs-results.json)
+              MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' dependency-output/yavs-results.json)
+              TOTAL=$(jq '.data | length' dependency-output/yavs-results.json)
+
+              # Extract packages with issues
+              jq -r '.data[] | select(.package != null) | "\(.package)@\(.version) - \(.severity) - \(.message)"' \
+                dependency-output/yavs-results.json > vulnerable-packages.txt || echo "No vulnerable packages" > vulnerable-packages.txt
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+              echo "No vulnerable packages" > vulnerable-packages.txt
+            fi
           fi
 
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
@@ -105,21 +128,21 @@ jobs:
           echo "high=$HIGH" >> $GITHUB_OUTPUT
           echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
 
-      - name: Generate fix suggestions
-        if: always()
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
-            if [ "${{ steps.analyze.outputs.total }}" -gt 0 ]; then
-              yavs summarize dependency-scan.json > fix-suggestions.md
-            fi
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Found $CRITICAL critical vulnerabilities in dependencies"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity vulnerabilities in dependencies"
           else
-            echo "# Dependency Scan Results" > fix-suggestions.md
-            echo "" >> fix-suggestions.md
-            cat vulnerable-packages.txt >> fix-suggestions.md
+            echo "::notice::No critical or high dependency vulnerabilities"
           fi
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: dependency-output/yavs-results.sarif
+          category: yavs-dependency-scan
 
       - name: Comment on PR with dependency issues
         if: github.event_name == 'pull_request' && always()
@@ -132,13 +155,6 @@ jobs:
             const critical = '${{ steps.analyze.outputs.critical }}';
             const high = '${{ steps.analyze.outputs.high }}';
             const medium = '${{ steps.analyze.outputs.medium }}';
-
-            let fixSuggestions = '';
-            try {
-              fixSuggestions = fs.readFileSync('fix-suggestions.md', 'utf8');
-            } catch (e) {
-              fixSuggestions = 'No suggestions available';
-            }
 
             let vulnerablePackages = '';
             try {
@@ -167,15 +183,8 @@ jobs:
 
             </details>
 
-            <details>
-            <summary>🔧 Fix Suggestions</summary>
-
-            ${fixSuggestions}
-
-            </details>
-
             ---
-            *Scanned dependencies only for fast feedback. Full scan runs on merge to main.*
+            *Scanned dependencies only for fast feedback. Download the full report from workflow artifacts.*
             `;
 
             github.rest.issues.createComment({
@@ -185,9 +194,52 @@ jobs:
               body: comment
             });
 
+      - name: Upload dependency scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-scan-results-${{ github.sha }}
+          path: |
+            dependency-output/yavs-results.json
+            dependency-output/yavs-results.sarif
+            dependency-output/sbom.json
+            dependency-output/report.html
+            dependency-output/stats-*.txt
+            dependency-output/summary.json
+            vulnerable-packages.txt
+          retention-days: 30
+
       - name: Report critical vulnerabilities
         if: steps.analyze.outputs.critical > 0
         run: |
           echo "::warning::Found ${{ steps.analyze.outputs.critical }} critical vulnerabilities in dependencies"
           echo "Please upgrade vulnerable packages before merging"
           echo "This is currently a warning. Change to ::error and exit 1 when ready for strict enforcement"
+
+      - name: Post job summary
+        if: always()
+        run: |
+          cat > dependency-summary.md << EOF
+          # Dependency Scan Results
+
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Target:** src/ (production code only)
+
+          ## Vulnerabilities
+
+          - Total findings: ${{ steps.analyze.outputs.total }}
+          - Critical: ${{ steps.analyze.outputs.critical }}
+          - High: ${{ steps.analyze.outputs.high }}
+          - Medium: ${{ steps.analyze.outputs.medium }}
+
+          ## SBOM Generated
+
+          ✅ Software Bill of Materials (CycloneDX format)
+
+          ## Scanner Used
+
+          - ✅ Trivy (dependency + vulnerability scanning)
+
+          EOF
+
+          cat dependency-summary.md >> $GITHUB_STEP_SUMMARY

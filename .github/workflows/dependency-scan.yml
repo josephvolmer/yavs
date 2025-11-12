@@ -25,30 +25,27 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install YAVS and Trivy
+      - name: Install YAVS
         run: |
           pip install -e .
 
-          # Install Trivy for dependency scanning
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+      - name: Install scanner dependencies
+        run: |
+          yavs tools install --no-python-tools
 
-      - name: Verify YAVS installation
+      - name: Verify installation
         run: |
           yavs version
-          which yavs
-          trivy --version
+          yavs tools status
 
       - name: Run dependency scan with SBOM generation
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Scanning dependencies and generating SBOM..."
-          echo "📦 Target: src/ (production code only)"
-          yavs scan src/ --sbom \
+          echo "🔍 Scanning dependencies and generating SBOM (demonstration)..."
+          echo "ℹ️  Scanning entire repository for demonstration purposes"
+          yavs scan . --sbom \
             --continue-on-error \
             --output-dir dependency-output
         continue-on-error: true
@@ -223,7 +220,7 @@ jobs:
           # Dependency Scan Results
 
           **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Target:** src/ (production code only)
+          **Target:** Entire repository (demonstration)
 
           ## Vulnerabilities
 

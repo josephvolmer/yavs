@@ -44,39 +44,27 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install YAVS from source
+      - name: Install YAVS
         run: |
           pip install -e .
 
-      - name: Install all security scanners
+      - name: Install all scanner dependencies
         run: |
-          # Trivy
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          yavs tools install
 
-          # Semgrep, Bandit, and Checkov
-          pip install semgrep bandit checkov
-
-      - name: Verify YAVS installation
+      - name: Verify installation
         run: |
           yavs version
-          which yavs
-          trivy --version
-          semgrep --version
-          bandit --version
-          checkov --version
+          yavs tools status
 
       - name: Run comprehensive security scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Starting comprehensive security scan..."
-          echo "📁 Target: src/ (production code only)"
-          echo "ℹ️  Test fixtures are excluded via ignore files"
-          yavs scan src/ --all \
+          echo "🔍 Starting comprehensive security scan (demonstration)..."
+          echo "ℹ️  Scanning entire repository for demonstration purposes"
+          yavs scan . --all \
             --continue-on-error \
             --output-dir comprehensive-scan-output
         continue-on-error: true
@@ -195,7 +183,7 @@ jobs:
           **Repository:** ${{ github.repository }}
           **Branch:** ${{ github.ref_name }}
           **Commit:** ${{ github.sha }}
-          **Target:** src/ (production code only)
+          **Target:** Entire repository (demonstration)
 
           ## Overview
 

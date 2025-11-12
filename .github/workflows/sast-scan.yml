@@ -24,24 +24,27 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install YAVS and SAST scanners
+      - name: Install YAVS
         run: |
           pip install -e .
-          pip install semgrep bandit
 
-      - name: Verify YAVS installation
+      - name: Install scanner dependencies
+        run: |
+          yavs tools install --no-trivy
+
+      - name: Verify installation
         run: |
           yavs version
-          which yavs
+          yavs tools status
 
       - name: Run SAST scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Running SAST scan on production code (src/)..."
-          echo "ℹ️  Test fixtures are excluded via ignore files"
-          yavs scan src/ --sast \
+          echo "🔍 Running SAST scan (demonstration)..."
+          echo "ℹ️  Scanning entire repository for demonstration purposes"
+          yavs scan . --sast \
             --continue-on-error \
             --output-dir sast-output
         continue-on-error: true
@@ -141,7 +144,7 @@ jobs:
           # SAST Scan Results
 
           **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Target:** src/ (production code only)
+          **Target:** Entire repository (demonstration)
 
           ## Results
 

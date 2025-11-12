@@ -24,25 +24,28 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install YAVS and compliance scanners
+      - name: Install YAVS
         run: |
           pip install -e .
-          pip install checkov
 
-      - name: Verify YAVS installation
+      - name: Install scanner dependencies
+        run: |
+          yavs tools install
+
+      - name: Verify installation
         run: |
           yavs version
-          which yavs
-          checkov --version
+          yavs tools status
 
       - name: Run compliance scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Running compliance scan on production code (src/)..."
+          echo "🔍 Running compliance scan (demonstration)..."
           echo "⚙️  Scanning IaC, Dockerfiles, and configuration files"
-          yavs scan src/ --compliance \
+          echo "ℹ️  Scanning entire repository for demonstration purposes"
+          yavs scan . --compliance \
             --continue-on-error \
             --output-dir compliance-output
         continue-on-error: true
@@ -148,7 +151,7 @@ jobs:
           # Compliance Scan Results
 
           **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Target:** src/ (production code only)
+          **Target:** Entire repository (demonstration)
 
           ## Results
 

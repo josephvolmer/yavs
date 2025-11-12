@@ -150,3 +150,52 @@ yavs scan --all --baseline .yavs-baseline.json
 
 # Generate baseline from current scan
 yavs scan --all --generate-baseline
+```
+
+### 7. Dependency Diff (`yavs diff`) ⏳ PENDING
+**Priority: LOW**
+
+Compare two scan results to see what changed.
+
+```bash
+# Compare current scan to previous
+yavs diff baseline-scan.json current-scan.json
+
+# Show only new vulnerabilities
+yavs diff --new-only previous.json current.json
+```
+
+### 8. Continuous Monitoring Integration ⏳ PENDING
+**Priority: MEDIUM**
+
+Webhook/API integration for CI/CD.
+
+```bash
+# Post results to webhook
+yavs scan --all --webhook https://your-endpoint.com/security
+
+# Export to monitoring tools
+yavs scan --all --export prometheus
+```
+
+---
+
+## Implementation Status
+
+| Feature | Status | Priority | Notes |
+|---------|--------|----------|-------|
+| Core Scanning | ✅ Complete | CRITICAL | All scanners integrated |
+| Output Formats | ✅ Complete | CRITICAL | JSON, SARIF, HTML |
+| AI Integration | ✅ Complete | HIGH | Multi-provider support |
+| SBOM Generation | ✅ Complete | HIGH | CycloneDX format |
+| Ignore Patterns | ✅ Complete | MEDIUM | Regex and glob support |
+| Statistics | ✅ Complete | MEDIUM | Multiple grouping options |
+| Baseline/Allowlist | ⏳ Pending | MEDIUM | Planned for future release |
+| Dependency Diff | ⏳ Pending | LOW | Planned for future release |
+| Webhook Integration | ⏳ Pending | MEDIUM | Planned for future release |
+
+---
+
+## Notes
+
+This document tracks the production CLI features and their implementation status. Features marked as **⏳ PENDING** are planned but not yet implemented. Refer to the main README.md for complete documentation of available features.

@@ -40,7 +40,13 @@ yavs scan --images-file examples/docker/images.txt --sbom
 
 ## CI/CD Examples
 
-See the individual files in `ci-cd/` for GitHub Actions, GitLab CI, Jenkins, and other CI/CD integrations.
+Comprehensive CI/CD pipeline examples for various platforms:
+- **github-actions.yml** - GitHub Actions workflow
+- **gitlab-ci.yml** - GitLab CI/CD pipeline
+- **jenkinsfile** - Jenkins declarative pipeline
+- **azure-pipelines.yml** - Azure DevOps pipeline
+
+All examples demonstrate full YAVS capabilities including scanning, reporting, SBOM generation, and optional integrations (Slack/Teams notifications, issue creation).
 
 ## Quick Start
 

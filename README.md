@@ -604,7 +604,7 @@ cp .github/workflows/scheduled-scan.yml YOUR_REPO/.github/workflows/
 # Value: your-api-key
 ```
 
-📚 **[Full Workflow Documentation](.github/workflows/README.md)** | 🎨 **[Visual Overview](.github/WORKFLOWS_OVERVIEW.md)**
+📚 **[Full Workflow Documentation](docs/WORKFLOWS_OVERVIEW.md)**
 
 ---
 

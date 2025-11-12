@@ -339,4 +339,4 @@ Permissions Required:
 
 ---
 
-For detailed setup instructions, see the [Workflows README](.github/workflows/README.md).
+For detailed setup instructions and individual workflow documentation, see the `.github/workflows/` directory. Each workflow file contains inline documentation and configuration examples.

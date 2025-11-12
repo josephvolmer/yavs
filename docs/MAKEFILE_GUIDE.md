@@ -1,6 +1,8 @@
 # YAVS Makefile & Automation Guide
 
-Complete guide to using the YAVS Makefile for easy development and testing.
+Complete **tutorial-style guide** to using the YAVS Makefile for easy development and testing.
+
+> **Also see**: [MAKEFILE_COMMANDS.md](MAKEFILE_COMMANDS.md) for a quick command reference
 
 ---
 

@@ -1,15 +1,19 @@
 # YAVS Quick Start Guide
 
-Get YAVS running in under 5 minutes!
+> **Note**: This guide is for **YAVS contributors and developers**. If you installed YAVS via `pip install yavs`, see the main [README.md](../README.md) for end-user documentation.
+
+Get YAVS development environment running in under 5 minutes!
 
 ---
 
-## 1. Install & Setup
+## 1. Development Setup
 
 ```bash
-cd /path/to/yavs
+# Clone the repository
+git clone https://github.com/josephvolmer/yavs.git
+cd yavs
 
-# Install YAVS and Trivy
+# Install YAVS in development mode and all scanner dependencies
 make setup
 
 # Check everything is ready

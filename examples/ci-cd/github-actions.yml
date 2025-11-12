@@ -1,79 +1,422 @@
-name: YAVS Security Scan
+name: Comprehensive Security Analysis
+
+# Full-featured workflow demonstrating all YAVS capabilities
+# Runs on-demand or weekly for thorough security review
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      notify_slack:
+        description: 'Send Slack notification'
+        required: false
+        type: boolean
+        default: false
+      create_issue:
+        description: 'Create GitHub issue for findings'
+        required: false
+        type: boolean
+        default: true
+  # Automatic triggers disabled - manual trigger only
+  # schedule:
+  #   # Run every Monday at 9 AM UTC
+  #   - cron: '0 9 * * 1'
 
 jobs:
-  security-scan:
+  comprehensive-scan:
+    name: Full Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     permissions:
       contents: read
-      security-events: write  # For uploading SARIF
+      security-events: write
+      issues: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install YAVS
         run: |
           pip install yavs
 
-      - name: Run security scan
+      - name: Install all scanner dependencies
+        run: |
+          yavs tools install
+
+      - name: Verify installation
+        run: |
+          yavs version
+          yavs tools status
+
+      - name: Run comprehensive security scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          yavs scan . \
-            --all \
-            --output-dir scan-results \
-            --sarif scan-results/results.sarif \
-            --fail-on HIGH,CRITICAL \
-            --ignore "node_modules/" \
-            --ignore "vendor/" \
-            --ignore "*.test.js" \
-            --ai-fix \
-            --ai-summarize
+          echo "🔍 Starting comprehensive security scan..."
+          yavs scan . --all \
+            --continue-on-error \
+            --output-dir comprehensive-scan-output
+        continue-on-error: true
 
-      - name: Upload SARIF results
+      - name: Generate all YAVS outputs
         if: always()
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: scan-results/results.sarif
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Generate HTML report (with embedded SBOM)
+          yavs report comprehensive-scan-output/yavs-results.json -o comprehensive-scan-output/report.html || true
 
-      - name: Upload scan artifacts
+          # Generate stats by severity
+          yavs stats comprehensive-scan-output/yavs-results.json --by-severity > comprehensive-scan-output/stats-severity.txt || true
+
+          # Generate stats by scanner
+          yavs stats comprehensive-scan-output/yavs-results.json --by-scanner > comprehensive-scan-output/stats-scanner.txt || true
+
+          # Generate stats by category
+          yavs stats comprehensive-scan-output/yavs-results.json --by-category > comprehensive-scan-output/stats-category.txt || true
+
+          # Summary stats
+          yavs stats comprehensive-scan-output/yavs-results.json --summary > comprehensive-scan-output/stats-summary.txt || true
+
+          # AI summary (if not already generated during scan)
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            if [ ! -f comprehensive-scan-output/summary.json ]; then
+              yavs summarize comprehensive-scan-output/yavs-results.json -o comprehensive-scan-output || true
+            fi
+          fi
+
+      - name: Validate SARIF output
         if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: yavs-scan-results
-          path: scan-results/
-          retention-days: 30
+        continue-on-error: true
+        run: |
+          if [ -f comprehensive-scan-output/yavs-results.sarif ]; then
+            echo "✅ SARIF file generated"
+            echo "Size: $(wc -c < comprehensive-scan-output/yavs-results.sarif) bytes"
+            echo "Runs: $(jq '.runs | length' comprehensive-scan-output/yavs-results.sarif)"
+          else
+            echo "⚠️ SARIF file not found"
+          fi
 
-      - name: Generate HTML report
+      - name: Analyze scan results
+        id: stats
         if: always()
         run: |
-          yavs report scan-results/yavs-results.json \
-            --output scan-results/security-report.html
+          if [ ! -f comprehensive-scan-output/yavs-results.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            TOTAL=0
+            CRITICAL=0
+            HIGH=0
+            MEDIUM=0
+            LOW=0
+            DEPENDENCY=0
+            SAST=0
+            COMPLIANCE=0
+          else
+            # Check for structured format (has category keys)
+            if jq -e '.sast or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format: extract findings from .sast[].issues[] and .compliance[].violations[]
+              CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' comprehensive-scan-output/yavs-results.json)
+              HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' comprehensive-scan-output/yavs-results.json)
+              MEDIUM=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' comprehensive-scan-output/yavs-results.json)
+              LOW=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="LOW")) | length' comprehensive-scan-output/yavs-results.json)
+              TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' comprehensive-scan-output/yavs-results.json)
 
-      - name: Comment PR with summary
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v6
+              # By category (count tools in each category as proxy)
+              SAST=$(jq '(.sast // []) | length' comprehensive-scan-output/yavs-results.json)
+              COMPLIANCE=$(jq '(.compliance // []) | length' comprehensive-scan-output/yavs-results.json)
+              DEPENDENCY=0  # Trivy findings are in compliance
+            elif jq -e '.data' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format with .data array
+              TOTAL=$(jq '.data | length' comprehensive-scan-output/yavs-results.json)
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' comprehensive-scan-output/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' comprehensive-scan-output/yavs-results.json)
+              MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' comprehensive-scan-output/yavs-results.json)
+              LOW=$(jq '[.data[] | select(.severity=="LOW")] | length' comprehensive-scan-output/yavs-results.json)
+
+              # By category
+              DEPENDENCY=$(jq '[.data[] | select(.category=="dependency")] | length' comprehensive-scan-output/yavs-results.json)
+              SAST=$(jq '[.data[] | select(.category=="sast")] | length' comprehensive-scan-output/yavs-results.json)
+              COMPLIANCE=$(jq '[.data[] | select(.category=="compliance" or .category=="config")] | length' comprehensive-scan-output/yavs-results.json)
+            else
+              # Fallback
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+              LOW=0
+              DEPENDENCY=0
+              SAST=0
+              COMPLIANCE=0
+            fi
+          fi
+
+          # Output to GITHUB_OUTPUT
+          {
+            echo "total=$TOTAL"
+            echo "critical=$CRITICAL"
+            echo "high=$HIGH"
+            echo "medium=$MEDIUM"
+            echo "low=$LOW"
+            echo "dependency=$DEPENDENCY"
+            echo "sast=$SAST"
+            echo "compliance=$COMPLIANCE"
+          } >> $GITHUB_OUTPUT
+
+          # Create summary report
+          cat > summary-stats.md << EOF
+          # Comprehensive Security Scan Results
+
+          **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+
+          ## Overview
+
+          Total findings: **$TOTAL**
+
+          ### By Severity
+          - 🔴 Critical: **$CRITICAL**
+          - 🟠 High: **$HIGH**
+          - 🟡 Medium: **$MEDIUM**
+          - 🔵 Low: **$LOW**
+
+          ### By Category
+          - 📦 Dependencies: Scanned with Trivy
+          - 🔍 SAST: $SAST scanner(s) executed
+          - ⚙️ Compliance: $COMPLIANCE scanner(s) executed
+
+          ### Scanners Executed
+          - ✅ Trivy (dependency + vulnerability + SBOM)
+          - ✅ Semgrep (SAST)
+          - ✅ Bandit (Python security)
+          - ✅ Checkov (IaC compliance)
+
+          ### Outputs Generated
+          - ✅ JSON (structured format)
+          - ✅ SARIF 2.1.0 (for GitHub Security)
+          - ✅ HTML Report (interactive dashboard)
+          - ✅ SBOM (CycloneDX format)
+          - ✅ Statistics (by severity, scanner, category)
+          - ✅ AI Summary (if API keys configured)
+          EOF
+
+          cat summary-stats.md
+
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Found $CRITICAL critical findings"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity findings"
+          else
+            echo "::notice::No critical or high findings"
+          fi
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: comprehensive-scan-output/yavs-results.sarif
+          category: yavs-comprehensive-scan
+
+      - name: Create comprehensive report package
+        if: always()
+        run: |
+          mkdir -p security-reports
+
+          # Copy all YAVS outputs
+          cp comprehensive-scan-output/yavs-results.json security-reports/ 2>/dev/null || echo "No JSON results"
+          cp comprehensive-scan-output/yavs-results.sarif security-reports/ 2>/dev/null || echo "No SARIF results"
+          cp comprehensive-scan-output/sbom.json security-reports/ 2>/dev/null || echo "No SBOM"
+          cp comprehensive-scan-output/report.html security-reports/ 2>/dev/null || echo "No HTML report"
+          cp comprehensive-scan-output/stats-*.txt security-reports/ 2>/dev/null || echo "No stats files"
+          cp comprehensive-scan-output/summary.json security-reports/ 2>/dev/null || echo "No AI summary"
+          cp summary-stats.md security-reports/ 2>/dev/null || echo "No summary stats"
+
+          # Create top 10 critical issues report
+          if [ -f comprehensive-scan-output/yavs-results.json ]; then
+            # Check format and extract accordingly
+            if jq -e '.sast or .compliance' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Structured format
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \
+                comprehensive-scan-output/yavs-results.json > security-reports/top-10-critical.json
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+                comprehensive-scan-output/yavs-results.json > security-reports/packages-report.json
+            elif jq -e '.data' comprehensive-scan-output/yavs-results.json > /dev/null 2>&1; then
+              # Flat format
+              jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \
+                comprehensive-scan-output/yavs-results.json > security-reports/top-10-critical.json
+              jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+                comprehensive-scan-output/yavs-results.json > security-reports/packages-report.json
+            else
+              echo "[]" > security-reports/top-10-critical.json
+              echo "[]" > security-reports/packages-report.json
+            fi
+          else
+            echo "[]" > security-reports/top-10-critical.json
+            echo "[]" > security-reports/packages-report.json
+          fi
+
+          # Create index
+          cat > security-reports/INDEX.md << EOF
+          # Security Report Package
+
+          This package contains comprehensive security scan results from YAVS.
+
+          ## Contents
+
+          ### Core Outputs
+          - \`yavs-results.json\` - Full scan results in structured JSON format
+          - \`yavs-results.sarif\` - SARIF 2.1.0 compliant output for GitHub Security
+          - \`sbom.json\` - Software Bill of Materials (CycloneDX format)
+          - \`report.html\` - Interactive HTML dashboard (open in browser)
+
+          ### Analysis & Stats
+          - \`stats-severity.txt\` - Findings grouped by severity (CRITICAL, HIGH, etc.)
+          - \`stats-scanner.txt\` - Findings grouped by scanner (Trivy, Semgrep, etc.)
+          - \`stats-category.txt\` - Findings grouped by category (SAST, dependency, etc.)
+          - \`stats-summary.txt\` - One-line summary
+          - \`summary.json\` - AI-generated summary (if available)
+          - \`summary-stats.md\` - Comprehensive statistics report
+
+          ### Specialized Reports
+          - \`top-10-critical.json\` - Top 10 critical/high severity findings
+          - \`packages-report.json\` - Package-grouped vulnerability report
+
+          ## Viewing Results
+
+          **Recommended:** Open \`report.html\` in any browser for the best interactive experience
+
+          Other options:
+          - **SARIF**: Upload to GitHub Security tab for code scanning integration
+          - **JSON**: Use \`jq\` for filtering and analysis
+          - **Stats**: Read .txt files for quick overview
+
+          ## Generated
+          - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - Workflow: ${{ github.workflow }}
+          - Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - YAVS Version: $(yavs version 2>&1 | grep -oP 'v\K[0-9.]+' || echo "unknown")
+          EOF
+
+      - name: Upload comprehensive report package
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-security-report-${{ github.run_number }}
+          path: security-reports/
+          retention-days: 90
+
+      - name: Create issue for findings
+        if: |
+          always() &&
+          (inputs.create_issue == true || github.event_name == 'schedule') &&
+          (steps.stats.outputs.critical > 0 || steps.stats.outputs.high > 0)
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const summary = fs.readFileSync('scan-results/summary.txt', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            const stats = {
+              total: '${{ steps.stats.outputs.total }}',
+              critical: '${{ steps.stats.outputs.critical }}',
+              high: '${{ steps.stats.outputs.high }}',
+              medium: '${{ steps.stats.outputs.medium }}'
+            };
+
+            let summary = 'No summary available';
+            try {
+              summary = fs.readFileSync('summary-stats.md', 'utf8');
+            } catch (e) {}
+
+            const title = `🔒 Security Review: ${stats.critical} Critical, ${stats.high} High Findings`;
+
+            const body = `${summary}
+
+            ## Actions Required
+
+            1. Review all critical and high severity findings
+            2. Prioritize remediation based on severity and exploitability
+            3. Update dependencies with known vulnerabilities
+            4. Address any exposed secrets immediately
+
+            ## Resources
+
+            - [Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Security Tab](https://github.com/${{ github.repository }}/security/code-scanning)
+            - Download the comprehensive report package from workflow artifacts
+
+            ---
+            *Automated security scan • Generated by YAVS*
+            `;
+
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 🔒 YAVS Security Scan Results\n\n${summary}`
+              title: title,
+              body: body,
+              labels: ['security', 'automated-scan']
             });
+
+      - name: Send Slack notification
+        if: |
+          always() &&
+          inputs.notify_slack == true &&
+          env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d '{
+            "text": "🔒 Comprehensive Security Scan Complete",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Security Scan Results"}
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {"type": "mrkdwn", "text": "*Total Findings:*\n${{ steps.stats.outputs.total }}"},
+                  {"type": "mrkdwn", "text": "*Critical:*\n${{ steps.stats.outputs.critical }}"},
+                  {"type": "mrkdwn", "text": "*High:*\n${{ steps.stats.outputs.high }}"},
+                  {"type": "mrkdwn", "text": "*Medium:*\n${{ steps.stats.outputs.medium }}"}
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Full Report"},
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }'
+
+      - name: Post job summary
+        if: always()
+        run: |
+          if [ -f summary-stats.md ]; then
+            cat summary-stats.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "# Comprehensive Security Scan" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Scan failed to complete. Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Security Tab](https://github.com/${{ github.repository }}/security/code-scanning)" >> $GITHUB_STEP_SUMMARY

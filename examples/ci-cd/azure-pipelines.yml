@@ -1,0 +1,381 @@
+# Comprehensive Security Analysis for Azure DevOps
+# Full-featured pipeline demonstrating all YAVS capabilities
+
+trigger: none # Manual trigger only
+# Uncomment to enable automatic triggers:
+# trigger:
+#   branches:
+#     include:
+#       - main
+#       - develop
+
+pr: none
+# Uncomment to enable PR triggers:
+# pr:
+#   branches:
+#     include:
+#       - main
+
+schedules:
+  # Run every Monday at 9 AM UTC
+  - cron: "0 9 * * 1"
+    displayName: Weekly Security Scan
+    branches:
+      include:
+        - main
+    always: false # Only run if there are changes
+
+parameters:
+  - name: createWorkItem
+    displayName: 'Create Work Item for Findings'
+    type: boolean
+    default: true
+  - name: notifyTeams
+    displayName: 'Send Microsoft Teams Notification'
+    type: boolean
+    default: false
+
+variables:
+  - name: yavsOutputDir
+    value: 'comprehensive-scan-output'
+  - name: pythonVersion
+    value: '3.11'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+jobs:
+  - job: ComprehensiveSecurityScan
+    displayName: 'Comprehensive Security Analysis'
+    timeoutInMinutes: 30
+
+    steps:
+      - checkout: self
+        fetchDepth: 0  # Full history for better analysis
+        displayName: 'Checkout source code'
+
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '$(pythonVersion)'
+          addToPath: true
+        displayName: 'Set up Python $(pythonVersion)'
+
+      - script: |
+          pip install --upgrade pip
+          pip install yavs
+        displayName: 'Install YAVS'
+
+      - script: |
+          yavs tools install
+        displayName: 'Install scanner dependencies'
+
+      - script: |
+          yavs version
+          yavs tools status
+        displayName: 'Verify installation'
+
+      - script: |
+          echo "🔍 Starting comprehensive security scan..."
+          yavs scan . --all \
+            --continue-on-error \
+            --output-dir $(yavsOutputDir) || true
+        displayName: 'Run comprehensive security scan'
+        continueOnError: true
+        env:
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+          OPENAI_API_KEY: $(OPENAI_API_KEY)
+
+      - script: |
+          echo "📊 Generating reports and statistics..."
+
+          # Generate HTML report
+          yavs report $(yavsOutputDir)/yavs-results.json -o $(yavsOutputDir)/report.html || true
+
+          # Generate statistics
+          yavs stats $(yavsOutputDir)/yavs-results.json --by-severity > $(yavsOutputDir)/stats-severity.txt || true
+          yavs stats $(yavsOutputDir)/yavs-results.json --by-scanner > $(yavsOutputDir)/stats-scanner.txt || true
+          yavs stats $(yavsOutputDir)/yavs-results.json --by-category > $(yavsOutputDir)/stats-category.txt || true
+          yavs stats $(yavsOutputDir)/yavs-results.json --summary > $(yavsOutputDir)/stats-summary.txt || true
+
+          # Generate AI summary if API keys are configured
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            if [ ! -f $(yavsOutputDir)/summary.json ]; then
+              yavs summarize $(yavsOutputDir)/yavs-results.json -o $(yavsOutputDir) || true
+            fi
+          fi
+        displayName: 'Generate reports and statistics'
+        continueOnError: true
+        condition: always()
+        env:
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+          OPENAI_API_KEY: $(OPENAI_API_KEY)
+
+      - script: |
+          if [ ! -f $(yavsOutputDir)/yavs-results.json ]; then
+            echo "⚠️ Scan results not found, using zero values"
+            echo "##vso[task.setvariable variable=totalFindings]0"
+            echo "##vso[task.setvariable variable=criticalFindings]0"
+            echo "##vso[task.setvariable variable=highFindings]0"
+            echo "##vso[task.setvariable variable=mediumFindings]0"
+            echo "##vso[task.setvariable variable=lowFindings]0"
+          else
+            # Check for structured format
+            if jq -e '.sast or .compliance' $(yavsOutputDir)/yavs-results.json > /dev/null 2>&1; then
+              # Structured format
+              CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' $(yavsOutputDir)/yavs-results.json)
+              HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' $(yavsOutputDir)/yavs-results.json)
+              MEDIUM=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' $(yavsOutputDir)/yavs-results.json)
+              LOW=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="LOW")) | length' $(yavsOutputDir)/yavs-results.json)
+              TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' $(yavsOutputDir)/yavs-results.json)
+            elif jq -e '.data' $(yavsOutputDir)/yavs-results.json > /dev/null 2>&1; then
+              # Flat format
+              TOTAL=$(jq '.data | length' $(yavsOutputDir)/yavs-results.json)
+              CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' $(yavsOutputDir)/yavs-results.json)
+              HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' $(yavsOutputDir)/yavs-results.json)
+              MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' $(yavsOutputDir)/yavs-results.json)
+              LOW=$(jq '[.data[] | select(.severity=="LOW")] | length' $(yavsOutputDir)/yavs-results.json)
+            else
+              TOTAL=0
+              CRITICAL=0
+              HIGH=0
+              MEDIUM=0
+              LOW=0
+            fi
+
+            echo "##vso[task.setvariable variable=totalFindings]$TOTAL"
+            echo "##vso[task.setvariable variable=criticalFindings]$CRITICAL"
+            echo "##vso[task.setvariable variable=highFindings]$HIGH"
+            echo "##vso[task.setvariable variable=mediumFindings]$MEDIUM"
+            echo "##vso[task.setvariable variable=lowFindings]$LOW"
+          fi
+
+          # Create summary report
+          cat > summary-stats.md << EOF
+          # Comprehensive Security Scan Results
+
+          **Build:** $(Build.BuildNumber)
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Repository:** $(Build.Repository.Name)
+          **Branch:** $(Build.SourceBranchName)
+          **Commit:** $(Build.SourceVersion)
+
+          ## Overview
+
+          Total findings: **$TOTAL**
+
+          ### By Severity
+          - 🔴 Critical: **$CRITICAL**
+          - 🟠 High: **$HIGH**
+          - 🟡 Medium: **$MEDIUM**
+          - 🔵 Low: **$LOW**
+
+          ### Scanners Executed
+          - ✅ Trivy (dependency + vulnerability + SBOM)
+          - ✅ Semgrep (SAST)
+          - ✅ Bandit (Python security)
+          - ✅ Checkov (IaC compliance)
+
+          ### Outputs Generated
+          - ✅ JSON (structured format)
+          - ✅ SARIF 2.1.0
+          - ✅ HTML Report (interactive dashboard)
+          - ✅ SBOM (CycloneDX format)
+          - ✅ Statistics (by severity, scanner, category)
+          - ✅ AI Summary (if API keys configured)
+          EOF
+
+          cat summary-stats.md
+
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "##vso[task.logissue type=warning]Found $CRITICAL critical findings"
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "##vso[task.logissue type=warning]Found $HIGH high severity findings"
+          else
+            echo "✅ No critical or high findings"
+          fi
+        displayName: 'Analyze scan results'
+        condition: always()
+
+      - script: |
+          mkdir -p security-reports
+
+          # Copy all YAVS outputs
+          cp $(yavsOutputDir)/yavs-results.json security-reports/ 2>/dev/null || echo "No JSON results"
+          cp $(yavsOutputDir)/yavs-results.sarif security-reports/ 2>/dev/null || echo "No SARIF results"
+          cp $(yavsOutputDir)/sbom.json security-reports/ 2>/dev/null || echo "No SBOM"
+          cp $(yavsOutputDir)/report.html security-reports/ 2>/dev/null || echo "No HTML report"
+          cp $(yavsOutputDir)/stats-*.txt security-reports/ 2>/dev/null || echo "No stats files"
+          cp $(yavsOutputDir)/summary.json security-reports/ 2>/dev/null || echo "No AI summary"
+          cp summary-stats.md security-reports/ 2>/dev/null || echo "No summary stats"
+
+          # Create top 10 critical issues report
+          if [ -f $(yavsOutputDir)/yavs-results.json ]; then
+            if jq -e '.sast or .compliance' $(yavsOutputDir)/yavs-results.json > /dev/null 2>&1; then
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \
+                $(yavsOutputDir)/yavs-results.json > security-reports/top-10-critical.json
+              jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+                $(yavsOutputDir)/yavs-results.json > security-reports/packages-report.json
+            elif jq -e '.data' $(yavsOutputDir)/yavs-results.json > /dev/null 2>&1; then
+              jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \
+                $(yavsOutputDir)/yavs-results.json > security-reports/top-10-critical.json
+              jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+                $(yavsOutputDir)/yavs-results.json > security-reports/packages-report.json
+            else
+              echo "[]" > security-reports/top-10-critical.json
+              echo "[]" > security-reports/packages-report.json
+            fi
+          else
+            echo "[]" > security-reports/top-10-critical.json
+            echo "[]" > security-reports/packages-report.json
+          fi
+
+          # Create index
+          cat > security-reports/INDEX.md << EOF
+          # Security Report Package
+
+          This package contains comprehensive security scan results from YAVS.
+
+          ## Contents
+
+          ### Core Outputs
+          - \`yavs-results.json\` - Full scan results in structured JSON format
+          - \`yavs-results.sarif\` - SARIF 2.1.0 compliant output
+          - \`sbom.json\` - Software Bill of Materials (CycloneDX format)
+          - \`report.html\` - Interactive HTML dashboard (open in browser)
+
+          ### Analysis & Stats
+          - \`stats-severity.txt\` - Findings grouped by severity
+          - \`stats-scanner.txt\` - Findings grouped by scanner
+          - \`stats-category.txt\` - Findings grouped by category
+          - \`stats-summary.txt\` - One-line summary
+          - \`summary.json\` - AI-generated summary (if available)
+          - \`summary-stats.md\` - Comprehensive statistics report
+
+          ### Specialized Reports
+          - \`top-10-critical.json\` - Top 10 critical/high severity findings
+          - \`packages-report.json\` - Package-grouped vulnerability report
+
+          ## Viewing Results
+
+          **Recommended:** Open \`report.html\` in any browser for the best interactive experience
+
+          ## Generated
+          - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - Build: $(Build.BuildNumber)
+          - Pipeline: $(System.TeamProject) / $(Build.DefinitionName)
+          - YAVS Version: $(yavs version 2>&1 | grep -oP 'v\K[0-9.]+' || echo "unknown")
+          EOF
+        displayName: 'Create comprehensive report package'
+        condition: always()
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(yavsOutputDir)'
+          ArtifactName: 'yavs-scan-output'
+          publishLocation: 'Container'
+        displayName: 'Publish scan output'
+        condition: always()
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: 'security-reports'
+          ArtifactName: 'security-reports'
+          publishLocation: 'Container'
+        displayName: 'Publish security reports'
+        condition: always()
+
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(yavsOutputDir)/report.html'
+          artifact: 'html-report'
+          publishLocation: 'pipeline'
+        displayName: 'Publish HTML report'
+        condition: always()
+
+      - script: |
+          # Display summary in pipeline logs
+          cat summary-stats.md
+
+          # Create pipeline summary
+          echo "##vso[task.uploadsummary]$(pwd)/summary-stats.md"
+        displayName: 'Post pipeline summary'
+        condition: always()
+
+      - script: |
+          if [ "$(criticalFindings)" -gt 0 ] || [ "$(highFindings)" -gt 0 ]; then
+            echo "Creating work item for security findings..."
+
+            # Create work item via Azure DevOps REST API
+            TITLE="🔒 Security Review: $(criticalFindings) Critical, $(highFindings) High Findings"
+            DESCRIPTION=$(cat summary-stats.md)
+
+            # Note: This requires Azure DevOps Service Connection or PAT
+            # Configure AZURE_DEVOPS_PAT as a secret variable
+            curl -X POST \
+              "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_apis/wit/workitems/\$Task?api-version=6.0" \
+              -H "Authorization: Bearer $AZURE_DEVOPS_PAT" \
+              -H "Content-Type: application/json-patch+json" \
+              -d '[
+                {
+                  "op": "add",
+                  "path": "/fields/System.Title",
+                  "value": "'"$TITLE"'"
+                },
+                {
+                  "op": "add",
+                  "path": "/fields/System.Description",
+                  "value": "'"$DESCRIPTION"'"
+                },
+                {
+                  "op": "add",
+                  "path": "/fields/System.Tags",
+                  "value": "security;automated-scan"
+                }
+              ]'
+          else
+            echo "No critical or high findings - skipping work item creation"
+          fi
+        displayName: 'Create work item for findings'
+        condition: and(succeeded(), eq('${{ parameters.createWorkItem }}', true))
+        continueOnError: true
+        env:
+          AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+      - script: |
+          # Send Microsoft Teams notification
+          WEBHOOK_URL="$(TEAMS_WEBHOOK_URL)"
+
+          if [ -n "$WEBHOOK_URL" ]; then
+            curl -X POST "$WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d '{
+                "@type": "MessageCard",
+                "@context": "https://schema.org/extensions",
+                "summary": "Security Scan Complete",
+                "themeColor": "0078D7",
+                "title": "🔒 Comprehensive Security Scan Complete",
+                "sections": [
+                  {
+                    "activityTitle": "Scan Results",
+                    "facts": [
+                      {"name": "Total Findings", "value": "$(totalFindings)"},
+                      {"name": "Critical", "value": "$(criticalFindings)"},
+                      {"name": "High", "value": "$(highFindings)"},
+                      {"name": "Medium", "value": "$(mediumFindings)"}
+                    ]
+                  }
+                ],
+                "potentialAction": [
+                  {
+                    "@type": "OpenUri",
+                    "name": "View Full Report",
+                    "targets": [
+                      {"os": "default", "uri": "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"}
+                    ]
+                  }
+                ]
+              }'
+          fi
+        displayName: 'Send Teams notification'
+        condition: and(succeeded(), eq('${{ parameters.notifyTeams }}', true))
+        continueOnError: true

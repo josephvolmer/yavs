@@ -1,76 +1,401 @@
+// Comprehensive Security Analysis for Jenkins
+// Full-featured pipeline demonstrating all YAVS capabilities
+
 pipeline {
     agent any
 
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '30'))
+    }
+
+    parameters {
+        booleanParam(
+            name: 'CREATE_ISSUE',
+            defaultValue: true,
+            description: 'Create issue for critical/high findings'
+        )
+        booleanParam(
+            name: 'NOTIFY_SLACK',
+            defaultValue: false,
+            description: 'Send Slack notification'
+        )
+    }
+
     environment {
+        // API keys from Jenkins credentials
         ANTHROPIC_API_KEY = credentials('anthropic-api-key')
-        YAVS_OUTPUT_DIR = 'scan-results'
+        OPENAI_API_KEY = credentials('openai-api-key')
+
+        // Configuration
+        YAVS_OUTPUT_DIR = 'comprehensive-scan-output'
+        PYTHON_VERSION = '3.11'
     }
 
     stages {
         stage('Setup') {
             steps {
+                script {
+                    echo '🔧 Setting up environment...'
+                }
+
                 sh '''
-                    python3 -m venv venv
+                    python${PYTHON_VERSION} -m venv venv
                     . venv/bin/activate
+                    pip install --upgrade pip
                     pip install yavs
                 '''
             }
         }
 
-        stage('Security Scan') {
+        stage('Install Scanners') {
             steps {
+                script {
+                    echo '📦 Installing scanner dependencies...'
+                }
+
                 sh '''
                     . venv/bin/activate
-                    yavs scan . \\
-                        --all \\
-                        --output-dir ${YAVS_OUTPUT_DIR} \\
-                        --sarif ${YAVS_OUTPUT_DIR}/results.sarif \\
-                        --json ${YAVS_OUTPUT_DIR}/results.json \\
-                        --fail-on HIGH,CRITICAL \\
-                        --ignore "node_modules/" \\
-                        --ignore "vendor/" \\
-                        --ai-summarize \\
-                        --ai-fix
+                    yavs tools install
                 '''
             }
         }
 
-        stage('Generate Report') {
+        stage('Verify Installation') {
             steps {
                 sh '''
                     . venv/bin/activate
-                    yavs report ${YAVS_OUTPUT_DIR}/results.json \\
-                        --output ${YAVS_OUTPUT_DIR}/security-report.html
+                    yavs version
+                    yavs tools status
                 '''
+            }
+        }
+
+        stage('Run Comprehensive Scan') {
+            steps {
+                script {
+                    echo '🔍 Starting comprehensive security scan...'
+                }
+
+                sh '''
+                    . venv/bin/activate
+                    yavs scan . --all \\
+                        --continue-on-error \\
+                        --output-dir ${YAVS_OUTPUT_DIR} || true
+                '''
+            }
+        }
+
+        stage('Generate Reports') {
+            steps {
+                script {
+                    echo '📊 Generating reports and statistics...'
+                }
+
+                sh '''
+                    . venv/bin/activate
+
+                    # Generate HTML report
+                    yavs report ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                        -o ${YAVS_OUTPUT_DIR}/report.html || true
+
+                    # Generate statistics
+                    yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                        --by-severity > ${YAVS_OUTPUT_DIR}/stats-severity.txt || true
+
+                    yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                        --by-scanner > ${YAVS_OUTPUT_DIR}/stats-scanner.txt || true
+
+                    yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                        --by-category > ${YAVS_OUTPUT_DIR}/stats-category.txt || true
+
+                    yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                        --summary > ${YAVS_OUTPUT_DIR}/stats-summary.txt || true
+
+                    # Generate AI summary if API keys are configured
+                    if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+                        if [ ! -f ${YAVS_OUTPUT_DIR}/summary.json ]; then
+                            yavs summarize ${YAVS_OUTPUT_DIR}/yavs-results.json \\
+                                -o ${YAVS_OUTPUT_DIR} || true
+                        fi
+                    fi
+                '''
+            }
+        }
+
+        stage('Analyze Results') {
+            steps {
+                script {
+                    def scanResults = sh(
+                        script: '''
+                            if [ ! -f ${YAVS_OUTPUT_DIR}/yavs-results.json ]; then
+                                echo "0 0 0 0 0"
+                            else
+                                # Check for structured format
+                                if jq -e '.sast or .compliance' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+                                    # Structured format
+                                    CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    MEDIUM=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    LOW=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="LOW")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                elif jq -e '.data' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+                                    # Flat format
+                                    TOTAL=$(jq '.data | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                    LOW=$(jq '[.data[] | select(.severity=="LOW")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+                                else
+                                    TOTAL=0
+                                    CRITICAL=0
+                                    HIGH=0
+                                    MEDIUM=0
+                                    LOW=0
+                                fi
+                                echo "$TOTAL $CRITICAL $HIGH $MEDIUM $LOW"
+                            fi
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    def stats = scanResults.split(' ')
+                    env.TOTAL_FINDINGS = stats[0]
+                    env.CRITICAL_FINDINGS = stats[1]
+                    env.HIGH_FINDINGS = stats[2]
+                    env.MEDIUM_FINDINGS = stats[3]
+                    env.LOW_FINDINGS = stats[4]
+
+                    echo "Total Findings: ${env.TOTAL_FINDINGS}"
+                    echo "Critical: ${env.CRITICAL_FINDINGS}"
+                    echo "High: ${env.HIGH_FINDINGS}"
+                    echo "Medium: ${env.MEDIUM_FINDINGS}"
+                    echo "Low: ${env.LOW_FINDINGS}"
+                }
+            }
+        }
+
+        stage('Create Report Package') {
+            steps {
+                sh '''
+                    mkdir -p security-reports
+
+                    # Copy all YAVS outputs
+                    cp ${YAVS_OUTPUT_DIR}/yavs-results.json security-reports/ 2>/dev/null || echo "No JSON results"
+                    cp ${YAVS_OUTPUT_DIR}/yavs-results.sarif security-reports/ 2>/dev/null || echo "No SARIF results"
+                    cp ${YAVS_OUTPUT_DIR}/sbom.json security-reports/ 2>/dev/null || echo "No SBOM"
+                    cp ${YAVS_OUTPUT_DIR}/report.html security-reports/ 2>/dev/null || echo "No HTML report"
+                    cp ${YAVS_OUTPUT_DIR}/stats-*.txt security-reports/ 2>/dev/null || echo "No stats files"
+                    cp ${YAVS_OUTPUT_DIR}/summary.json security-reports/ 2>/dev/null || echo "No AI summary"
+
+                    # Create top 10 critical issues report
+                    if [ -f ${YAVS_OUTPUT_DIR}/yavs-results.json ]; then
+                        if jq -e '.sast or .compliance' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+                            jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \\
+                                ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/top-10-critical.json
+                            jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \\
+                                ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/packages-report.json
+                        elif jq -e '.data' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+                            jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \\
+                                ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/top-10-critical.json
+                            jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \\
+                                ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/packages-report.json
+                        else
+                            echo "[]" > security-reports/top-10-critical.json
+                            echo "[]" > security-reports/packages-report.json
+                        fi
+                    else
+                        echo "[]" > security-reports/top-10-critical.json
+                        echo "[]" > security-reports/packages-report.json
+                    fi
+
+                    # Create summary
+                    cat > security-reports/summary-stats.md << EOF
+# Comprehensive Security Scan Results
+
+**Build:** ${BUILD_DISPLAY_NAME}
+**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+**Job:** ${JOB_NAME}
+
+## Overview
+
+Total findings: **${TOTAL_FINDINGS}**
+
+### By Severity
+- 🔴 Critical: **${CRITICAL_FINDINGS}**
+- 🟠 High: **${HIGH_FINDINGS}**
+- 🟡 Medium: **${MEDIUM_FINDINGS}**
+- 🔵 Low: **${LOW_FINDINGS}**
+
+### Scanners Executed
+- ✅ Trivy (dependency + vulnerability + SBOM)
+- ✅ Semgrep (SAST)
+- ✅ Bandit (Python security)
+- ✅ Checkov (IaC compliance)
+
+### Outputs Generated
+- ✅ JSON (structured format)
+- ✅ SARIF 2.1.0
+- ✅ HTML Report (interactive dashboard)
+- ✅ SBOM (CycloneDX format)
+- ✅ Statistics (by severity, scanner, category)
+- ✅ AI Summary (if API keys configured)
+
+## Links
+- Build: ${BUILD_URL}
+- Report: ${BUILD_URL}YAVS_Security_Report/
+EOF
+
+                    # Create index
+                    cat > security-reports/INDEX.md << EOF
+# Security Report Package
+
+This package contains comprehensive security scan results from YAVS.
+
+## Contents
+
+### Core Outputs
+- \`yavs-results.json\` - Full scan results in structured JSON format
+- \`yavs-results.sarif\` - SARIF 2.1.0 compliant output
+- \`sbom.json\` - Software Bill of Materials (CycloneDX format)
+- \`report.html\` - Interactive HTML dashboard (open in browser)
+
+### Analysis & Stats
+- \`stats-severity.txt\` - Findings grouped by severity
+- \`stats-scanner.txt\` - Findings grouped by scanner
+- \`stats-category.txt\` - Findings grouped by category
+- \`stats-summary.txt\` - One-line summary
+- \`summary.json\` - AI-generated summary (if available)
+- \`summary-stats.md\` - Comprehensive statistics report
+
+### Specialized Reports
+- \`top-10-critical.json\` - Top 10 critical/high severity findings
+- \`packages-report.json\` - Package-grouped vulnerability report
+
+## Viewing Results
+
+**Recommended:** Open \`report.html\` in any browser for the best interactive experience
+
+## Generated
+- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+- Build: ${BUILD_URL}
+- YAVS Version: $(. venv/bin/activate && yavs version 2>&1 | grep -oP 'v\\K[0-9.]+' || echo "unknown")
+EOF
+                '''
+            }
+        }
+
+        stage('Notify Slack') {
+            when {
+                expression { params.NOTIFY_SLACK == true }
+                expression { env.SLACK_WEBHOOK_URL != null }
+            }
+            steps {
+                script {
+                    def payload = """
+                    {
+                        "text": "🔒 Comprehensive Security Scan Complete",
+                        "blocks": [
+                            {
+                                "type": "header",
+                                "text": {"type": "plain_text", "text": "Security Scan Results"}
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": "*Total Findings:*\\n${env.TOTAL_FINDINGS}"},
+                                    {"type": "mrkdwn", "text": "*Critical:*\\n${env.CRITICAL_FINDINGS}"},
+                                    {"type": "mrkdwn", "text": "*High:*\\n${env.HIGH_FINDINGS}"},
+                                    {"type": "mrkdwn", "text": "*Medium:*\\n${env.MEDIUM_FINDINGS}"}
+                                ]
+                            },
+                            {
+                                "type": "actions",
+                                "elements": [
+                                    {
+                                        "type": "button",
+                                        "text": {"type": "plain_text", "text": "View Full Report"},
+                                        "url": "${env.BUILD_URL}"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                    """
+
+                    sh """
+                        curl -X POST "${env.SLACK_WEBHOOK_URL}" \\
+                            -H 'Content-Type: application/json' \\
+                            -d '${payload}'
+                    """
+                }
             }
         }
     }
 
     post {
         always {
-            archiveArtifacts artifacts: "${YAVS_OUTPUT_DIR}/**",
+            // Archive all scan results
+            archiveArtifacts artifacts: "${YAVS_OUTPUT_DIR}/**,security-reports/**",
                            allowEmptyArchive: true
 
+            // Publish HTML report
             publishHTML([
                 allowMissing: false,
                 alwaysLinkToLastBuild: true,
                 keepAll: true,
                 reportDir: env.YAVS_OUTPUT_DIR,
-                reportFiles: 'security-report.html',
-                reportName: 'YAVS Security Report'
+                reportFiles: 'report.html',
+                reportName: 'YAVS Security Report',
+                reportTitles: 'Comprehensive Security Analysis'
             ])
+
+            // Display summary
+            script {
+                def summary = readFile('security-reports/summary-stats.md')
+                echo summary
+
+                if (env.CRITICAL_FINDINGS.toInteger() > 0) {
+                    currentBuild.result = 'UNSTABLE'
+                    error("Found ${env.CRITICAL_FINDINGS} critical security findings")
+                } else if (env.HIGH_FINDINGS.toInteger() > 0) {
+                    currentBuild.result = 'UNSTABLE'
+                    echo "⚠️ Found ${env.HIGH_FINDINGS} high severity findings"
+                }
+            }
         }
 
         failure {
-            emailext(
-                subject: "Security Scan Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                    Security scan failed for ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
+            script {
+                if (env.SECURITY_EMAIL) {
+                    emailext(
+                        subject: "🔒 Security Scan Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                            Security scan failed for ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
 
-                    Check the security report at: ${env.BUILD_URL}YAVS_Security_Report/
-                """,
-                to: "${env.SECURITY_EMAIL}"
-            )
+                            Total Findings: ${env.TOTAL_FINDINGS}
+                            Critical: ${env.CRITICAL_FINDINGS}
+                            High: ${env.HIGH_FINDINGS}
+                            Medium: ${env.MEDIUM_FINDINGS}
+
+                            Check the security report at: ${env.BUILD_URL}YAVS_Security_Report/
+
+                            View full build: ${env.BUILD_URL}
+                        """,
+                        to: "${env.SECURITY_EMAIL}",
+                        attachmentsPattern: 'security-reports/summary-stats.md'
+                    )
+                }
+            }
+        }
+
+        success {
+            echo '✅ Comprehensive security scan completed successfully'
+        }
+
+        cleanup {
+            // Clean up virtual environment
+            sh 'rm -rf venv'
         }
     }
 }

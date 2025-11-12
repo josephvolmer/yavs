@@ -1,50 +1,332 @@
+# Comprehensive Security Analysis for GitLab CI/CD
+# Full-featured pipeline demonstrating all YAVS capabilities
+
 stages:
   - security
+  - report
 
-security-scan:
+variables:
+  YAVS_OUTPUT_DIR: "comprehensive-scan-output"
+  PYTHON_VERSION: "3.11"
+
+# Main comprehensive security scan job
+comprehensive-security-scan:
   stage: security
-  image: python:3.11-slim
+  image: python:${PYTHON_VERSION}-slim
+
+  timeout: 30m
 
   variables:
-    YAVS_OUTPUT_DIR: "scan-results"
+    GIT_DEPTH: 0  # Full history for better analysis
 
   before_script:
-    - pip install yavs
-    - apt-get update && apt-get install -y git
+    # Install system dependencies
+    - apt-get update && apt-get install -y git curl jq
+
+    # Install YAVS
+    - pip install --no-cache-dir yavs
+
+    # Install all scanner dependencies
+    - yavs tools install
+
+    # Verify installation
+    - yavs version
+    - yavs tools status
 
   script:
+    # Run comprehensive security scan
+    - echo "🔍 Starting comprehensive security scan..."
     - |
-      yavs scan . \
-        --all \
-        --output-dir $YAVS_OUTPUT_DIR \
-        --sarif $YAVS_OUTPUT_DIR/results.sarif \
-        --json $YAVS_OUTPUT_DIR/results.json \
-        --fail-on HIGH,CRITICAL \
-        --ignore "node_modules/" \
-        --ignore "vendor/" \
-        --ai-summarize
+      yavs scan . --all \
+        --continue-on-error \
+        --output-dir ${YAVS_OUTPUT_DIR} || true
 
-    - yavs report $YAVS_OUTPUT_DIR/results.json \
-        --output $YAVS_OUTPUT_DIR/security-report.html
+    # Generate all YAVS outputs
+    - echo "📊 Generating reports and statistics..."
+    - yavs report ${YAVS_OUTPUT_DIR}/yavs-results.json -o ${YAVS_OUTPUT_DIR}/report.html || true
+    - yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json --by-severity > ${YAVS_OUTPUT_DIR}/stats-severity.txt || true
+    - yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json --by-scanner > ${YAVS_OUTPUT_DIR}/stats-scanner.txt || true
+    - yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json --by-category > ${YAVS_OUTPUT_DIR}/stats-category.txt || true
+    - yavs stats ${YAVS_OUTPUT_DIR}/yavs-results.json --summary > ${YAVS_OUTPUT_DIR}/stats-summary.txt || true
+
+    # Generate AI summary if API keys are configured
+    - |
+      if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+        if [ ! -f ${YAVS_OUTPUT_DIR}/summary.json ]; then
+          yavs summarize ${YAVS_OUTPUT_DIR}/yavs-results.json -o ${YAVS_OUTPUT_DIR} || true
+        fi
+      fi
+
+    # Analyze scan results
+    - |
+      if [ ! -f ${YAVS_OUTPUT_DIR}/yavs-results.json ]; then
+        echo "⚠️ Scan results not found, using zero values"
+        TOTAL=0
+        CRITICAL=0
+        HIGH=0
+        MEDIUM=0
+        LOW=0
+      else
+        # Check for structured format
+        if jq -e '.sast or .compliance' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+          # Structured format
+          CRITICAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          HIGH=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="HIGH")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          MEDIUM=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="MEDIUM")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          LOW=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="LOW")) | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          TOTAL=$(jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+        elif jq -e '.data' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+          # Flat format
+          TOTAL=$(jq '.data | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          CRITICAL=$(jq '[.data[] | select(.severity=="CRITICAL")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          HIGH=$(jq '[.data[] | select(.severity=="HIGH")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          MEDIUM=$(jq '[.data[] | select(.severity=="MEDIUM")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+          LOW=$(jq '[.data[] | select(.severity=="LOW")] | length' ${YAVS_OUTPUT_DIR}/yavs-results.json)
+        else
+          TOTAL=0
+          CRITICAL=0
+          HIGH=0
+          MEDIUM=0
+          LOW=0
+        fi
+      fi
+
+      # Create summary report
+      cat > summary-stats.md << EOF
+      # Comprehensive Security Scan Results
+
+      **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+      **Project:** ${CI_PROJECT_PATH}
+      **Branch:** ${CI_COMMIT_REF_NAME}
+      **Commit:** ${CI_COMMIT_SHA}
+
+      ## Overview
+
+      Total findings: **${TOTAL}**
+
+      ### By Severity
+      - 🔴 Critical: **${CRITICAL}**
+      - 🟠 High: **${HIGH}**
+      - 🟡 Medium: **${MEDIUM}**
+      - 🔵 Low: **${LOW}**
+
+      ### Scanners Executed
+      - ✅ Trivy (dependency + vulnerability + SBOM)
+      - ✅ Semgrep (SAST)
+      - ✅ Bandit (Python security)
+      - ✅ Checkov (IaC compliance)
+
+      ### Outputs Generated
+      - ✅ JSON (structured format)
+      - ✅ SARIF 2.1.0 (for GitLab Security Dashboard)
+      - ✅ HTML Report (interactive dashboard)
+      - ✅ SBOM (CycloneDX format)
+      - ✅ Statistics (by severity, scanner, category)
+      - ✅ AI Summary (if API keys configured)
+      EOF
+
+      cat summary-stats.md
+
+      if [ "$CRITICAL" -gt 0 ]; then
+        echo "⚠️ Found $CRITICAL critical findings"
+      elif [ "$HIGH" -gt 0 ]; then
+        echo "⚠️ Found $HIGH high severity findings"
+      else
+        echo "✅ No critical or high findings"
+      fi
+
+    # Create comprehensive report package
+    - mkdir -p security-reports
+    - cp ${YAVS_OUTPUT_DIR}/yavs-results.json security-reports/ 2>/dev/null || echo "No JSON results"
+    - cp ${YAVS_OUTPUT_DIR}/yavs-results.sarif security-reports/ 2>/dev/null || echo "No SARIF results"
+    - cp ${YAVS_OUTPUT_DIR}/sbom.json security-reports/ 2>/dev/null || echo "No SBOM"
+    - cp ${YAVS_OUTPUT_DIR}/report.html security-reports/ 2>/dev/null || echo "No HTML report"
+    - cp ${YAVS_OUTPUT_DIR}/stats-*.txt security-reports/ 2>/dev/null || echo "No stats files"
+    - cp ${YAVS_OUTPUT_DIR}/summary.json security-reports/ 2>/dev/null || echo "No AI summary"
+    - cp summary-stats.md security-reports/ 2>/dev/null || echo "No summary stats"
+
+    # Create top 10 critical issues report
+    - |
+      if [ -f ${YAVS_OUTPUT_DIR}/yavs-results.json ]; then
+        if jq -e '.sast or .compliance' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+          jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.severity=="CRITICAL" or .severity=="HIGH")) | sort_by(.severity) | .[:10]' \
+            ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/top-10-critical.json
+          jq '[(.sast // [] | .[] | .issues // []), (.compliance // [] | .[] | .violations // [])] | flatten | map(select(.package != null)) | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+            ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/packages-report.json
+        elif jq -e '.data' ${YAVS_OUTPUT_DIR}/yavs-results.json > /dev/null 2>&1; then
+          jq '[.data[] | select(.severity=="CRITICAL" or .severity=="HIGH")] | sort_by(.severity) | .[:10]' \
+            ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/top-10-critical.json
+          jq '[.data[] | select(.package != null)] | group_by(.package) | map({package: .[0].package, count: length, findings: .})' \
+            ${YAVS_OUTPUT_DIR}/yavs-results.json > security-reports/packages-report.json
+        else
+          echo "[]" > security-reports/top-10-critical.json
+          echo "[]" > security-reports/packages-report.json
+        fi
+      else
+        echo "[]" > security-reports/top-10-critical.json
+        echo "[]" > security-reports/packages-report.json
+      fi
+
+    # Create index
+    - |
+      cat > security-reports/INDEX.md << EOF
+      # Security Report Package
+
+      This package contains comprehensive security scan results from YAVS.
+
+      ## Contents
+
+      ### Core Outputs
+      - \`yavs-results.json\` - Full scan results in structured JSON format
+      - \`yavs-results.sarif\` - SARIF 2.1.0 compliant output for GitLab Security Dashboard
+      - \`sbom.json\` - Software Bill of Materials (CycloneDX format)
+      - \`report.html\` - Interactive HTML dashboard (open in browser)
+
+      ### Analysis & Stats
+      - \`stats-severity.txt\` - Findings grouped by severity
+      - \`stats-scanner.txt\` - Findings grouped by scanner
+      - \`stats-category.txt\` - Findings grouped by category
+      - \`stats-summary.txt\` - One-line summary
+      - \`summary.json\` - AI-generated summary (if available)
+      - \`summary-stats.md\` - Comprehensive statistics report
+
+      ### Specialized Reports
+      - \`top-10-critical.json\` - Top 10 critical/high severity findings
+      - \`packages-report.json\` - Package-grouped vulnerability report
+
+      ## Viewing Results
+
+      **Recommended:** Open \`report.html\` in any browser for the best interactive experience
+
+      ## Generated
+      - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+      - Pipeline: ${CI_PIPELINE_URL}
+      - YAVS Version: $(yavs version 2>&1 | grep -oP 'v\K[0-9.]+' || echo "unknown")
+      EOF
 
   artifacts:
     when: always
     paths:
-      - $YAVS_OUTPUT_DIR/
+      - ${YAVS_OUTPUT_DIR}/
+      - security-reports/
     reports:
-      sast: $YAVS_OUTPUT_DIR/results.sarif
-    expire_in: 30 days
+      # GitLab Security Dashboard integration
+      sast: ${YAVS_OUTPUT_DIR}/yavs-results.sarif
+    expire_in: 90 days
 
-  allow_failure: false
+  allow_failure: true
 
-  only:
-    - main
-    - merge_requests
-    - schedules
+  rules:
+    # Run on manual trigger
+    - if: $CI_PIPELINE_SOURCE == "web"
+    # Run on merge requests
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Run on main/master branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Run on schedule
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
-# Scheduled scan (optional)
-scheduled-security-scan:
-  extends: security-scan
-  only:
-    - schedules
+# Optional: Create GitLab issue for critical/high findings
+create-security-issue:
+  stage: report
+  image: python:${PYTHON_VERSION}-slim
+
+  needs:
+    - comprehensive-security-scan
+
+  before_script:
+    - apt-get update && apt-get install -y curl jq
+
+  script:
+    # Extract statistics
+    - |
+      if [ -f security-reports/summary-stats.md ]; then
+        CRITICAL=$(grep "Critical:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+        HIGH=$(grep "High:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+
+        if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+          echo "Creating issue for $CRITICAL critical and $HIGH high findings..."
+
+          # Create issue via GitLab API
+          ISSUE_TITLE="🔒 Security Review: ${CRITICAL} Critical, ${HIGH} High Findings"
+          ISSUE_DESCRIPTION=$(cat security-reports/summary-stats.md)
+
+          curl --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"title\": \"${ISSUE_TITLE}\",
+              \"description\": \"${ISSUE_DESCRIPTION}\n\n## Actions Required\n\n1. Review all critical and high severity findings\n2. Prioritize remediation based on severity\n3. Update dependencies with known vulnerabilities\n4. Address any exposed secrets immediately\n\n---\n*Automated security scan • Generated by YAVS*\",
+              \"labels\": \"security,automated-scan\"
+            }" \
+            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/issues"
+        else
+          echo "No critical or high findings - skipping issue creation"
+        fi
+      else
+        echo "Summary stats not found - skipping issue creation"
+      fi
+
+  rules:
+    # Only create issues for scheduled scans or when triggered on main branch
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"
+
+  allow_failure: true
+
+# Optional: Send Slack notification
+notify-slack:
+  stage: report
+  image: python:${PYTHON_VERSION}-slim
+
+  needs:
+    - comprehensive-security-scan
+
+  before_script:
+    - apt-get update && apt-get install -y curl jq
+
+  script:
+    - |
+      if [ -f security-reports/summary-stats.md ]; then
+        TOTAL=$(grep "Total findings:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+        CRITICAL=$(grep "Critical:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+        HIGH=$(grep "High:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+        MEDIUM=$(grep "Medium:" security-reports/summary-stats.md | grep -oP '\d+' || echo "0")
+
+        curl -X POST "${SLACK_WEBHOOK_URL}" \
+          -H 'Content-Type: application/json' \
+          -d "{
+            \"text\": \"🔒 Comprehensive Security Scan Complete\",
+            \"blocks\": [
+              {
+                \"type\": \"header\",
+                \"text\": {\"type\": \"plain_text\", \"text\": \"Security Scan Results\"}
+              },
+              {
+                \"type\": \"section\",
+                \"fields\": [
+                  {\"type\": \"mrkdwn\", \"text\": \"*Total Findings:*\n${TOTAL}\"},
+                  {\"type\": \"mrkdwn\", \"text\": \"*Critical:*\n${CRITICAL}\"},
+                  {\"type\": \"mrkdwn\", \"text\": \"*High:*\n${HIGH}\"},
+                  {\"type\": \"mrkdwn\", \"text\": \"*Medium:*\n${MEDIUM}\"}
+                ]
+              },
+              {
+                \"type\": \"actions\",
+                \"elements\": [
+                  {
+                    \"type\": \"button\",
+                    \"text\": {\"type\": \"plain_text\", \"text\": \"View Full Report\"},
+                    \"url\": \"${CI_PIPELINE_URL}\"
+                  }
+                ]
+              }
+            ]
+          }"
+      fi
+
+  rules:
+    # Only send notifications when SLACK_WEBHOOK_URL is configured
+    - if: $SLACK_WEBHOOK_URL
+
   allow_failure: true

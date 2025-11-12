@@ -1,0 +1,202 @@
+name: Policy Enforcement Demo
+
+# Demonstrates Policy-as-Code enforcement in CI/CD
+# Shows how to fail builds based on security policy violations
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'examples/policies/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  policy-enforcement:
+    name: Security Policy Enforcement
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git blame
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install YAVS
+        run: |
+          pip install -e .
+          echo "✓ YAVS installed"
+
+      - name: Install scanners
+        run: |
+          yavs tools install
+          echo "✓ Scanner tools installed"
+
+      - name: Run scan with policy enforcement
+        id: scan
+        run: |
+          echo "🔒 Running security scan with policy enforcement..."
+
+          yavs scan src/ \
+            --auto \
+            --all \
+            --blame \
+            --policy src/yavs/policy/builtins/security.yaml \
+            --policy src/yavs/policy/builtins/compliance.yaml \
+            --policy-mode enforce \
+            --fail-on HIGH \
+            --csv scan-results/findings.csv \
+            --output-dir scan-results \
+            --no-ai \
+            --continue-on-error
+
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "✨ Policy features demonstrated:"
+          echo "  ✓ Multiple policies (security + compliance)"
+          echo "  ✓ Enforce mode (fails build on violations)"
+          echo "  ✓ Git blame for ownership tracking"
+          echo "  ✓ Auto-detect for multi-language projects"
+
+          exit $EXIT_CODE
+        continue-on-error: true
+
+      - name: Analyze policy results
+        if: always()
+        run: |
+          if [ -f scan-results/scan-results.json ]; then
+            echo "📊 Policy Analysis:"
+
+            # Count policy suppressions
+            SUPPRESSED=$(jq '[.data[]? | select(.suppressed_by_policy == true)] | length' scan-results/scan-results.json)
+            echo "  - Findings suppressed by policy: $SUPPRESSED"
+
+            # Count policy violations
+            VIOLATIONS=$(jq '[.data[]? | select(.policy_violation == true)] | length' scan-results/scan-results.json)
+            echo "  - Policy violations found: $VIOLATIONS"
+
+            # Count policy warnings
+            WARNINGS=$(jq '[.data[]? | select(.policy_warning == true)] | length' scan-results/scan-results.json)
+            echo "  - Policy warnings: $WARNINGS"
+
+            # Show findings with git blame
+            BLAMED=$(jq '[.data[]? | select(.git_blame != null)] | length' scan-results/scan-results.json)
+            echo "  - Findings with git blame: $BLAMED"
+          fi
+
+      - name: Upload policy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-enforcement-results
+          path: |
+            scan-results/
+            !scan-results/**/*.log
+          retention-days: 30
+
+      - name: Comment on policy violations
+        if: steps.scan.outputs.exit_code == '1' && github.event_name == 'push'
+        run: |
+          echo "⚠️  Policy violations detected!"
+          echo ""
+          echo "The security scan found policy violations that require attention:"
+          echo "- Review the scan results in the artifacts"
+          echo "- Check scan-results/findings.csv for detailed findings"
+          echo "- Findings are tagged with responsible team via git blame"
+          echo ""
+          echo "Policy files used:"
+          echo "- src/yavs/policy/builtins/security.yaml"
+          echo "- src/yavs/policy/builtins/compliance.yaml"
+
+      - name: Upload to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scan-results/yavs-results.sarif
+          category: yavs-policy-enforcement
+
+  policy-audit:
+    name: Security Policy Audit (Non-Blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install YAVS
+        run: pip install -e .
+
+      - name: Run scan in audit mode
+        run: |
+          echo "📋 Running security scan in audit mode (reporting only)..."
+
+          yavs scan src/ \
+            --auto \
+            --all \
+            --policy src/yavs/policy/builtins/security.yaml \
+            --policy-mode audit \
+            --csv audit-results/findings.csv \
+            --output-dir audit-results \
+            --no-ai \
+            --continue-on-error
+
+          echo ""
+          echo "✅ Audit mode never fails the build"
+          echo "   This is useful for:"
+          echo "   - Monitoring policy violations without blocking"
+          echo "   - Testing new policies before enforcement"
+          echo "   - Generating compliance reports"
+
+      - name: Generate policy compliance report
+        if: always()
+        run: |
+          if [ -f audit-results/scan-results.json ]; then
+            echo "📊 Policy Compliance Report" > compliance-report.txt
+            echo "============================" >> compliance-report.txt
+            echo "" >> compliance-report.txt
+
+            jq -r '
+              "Total Findings: " + (.summary.total | tostring),
+              "Policy Suppressions: " + ([.data[]? | select(.suppressed_by_policy == true)] | length | tostring),
+              "Policy Violations: " + ([.data[]? | select(.policy_violation == true)] | length | tostring),
+              "Policy Warnings: " + ([.data[]? | select(.policy_warning == true)] | length | tostring),
+              "",
+              "By Severity:",
+              "  CRITICAL: " + (.summary.by_severity.CRITICAL | tostring),
+              "  HIGH: " + (.summary.by_severity.HIGH | tostring),
+              "  MEDIUM: " + (.summary.by_severity.MEDIUM | tostring),
+              "  LOW: " + (.summary.by_severity.LOW | tostring)
+            ' audit-results/scan-results.json >> compliance-report.txt
+
+            cat compliance-report.txt
+          fi
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-audit-results
+          path: |
+            audit-results/
+            compliance-report.txt
+          retention-days: 90  # Keep audit logs longer

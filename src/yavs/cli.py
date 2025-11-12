@@ -18,11 +18,12 @@ from rich.align import Align
 from rich.text import Text
 
 from . import __version__
-from .scanners import TrivyScanner, SemgrepScanner, CheckovScanner, BanditScanner, BinSkimScanner
+from .scanners import TrivyScanner, SemgrepScanner, CheckovScanner, BanditScanner, BinSkimScanner, TerrascanScanner, TemplateAnalyzerScanner
 from .scanners.base import BaseScanner
 from .scanners.sbom import SBOMGenerator
 from .reporting import Aggregator, SARIFConverter
 from .reporting.structured_output import StructuredOutputFormatter
+from .exporters import export_to_csv, export_to_tsv
 from .ai import Summarizer, Fixer, TriageEngine
 from .utils.logging import get_logger, console, configure_logging
 from .utils.schema_validator import validate_sarif
@@ -343,6 +344,38 @@ def load_config(config_path: Optional[Path] = None) -> dict:
         }
 
 
+def should_fail_fast(findings: List[Dict], fail_on_severity: str) -> bool:
+    """
+    Check if scan should exit early based on fail-fast mode.
+
+    Args:
+        findings: List of all findings so far
+        fail_on_severity: Severity threshold (CRITICAL, HIGH, MEDIUM, LOW)
+
+    Returns:
+        True if a finding at or above threshold is found
+    """
+    severity_order = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+    # Get threshold index
+    try:
+        threshold_index = severity_order.index(fail_on_severity.upper())
+    except (ValueError, AttributeError):
+        return False
+
+    # Check if any finding meets or exceeds threshold
+    for finding in findings:
+        finding_severity = finding.get('severity', 'INFO').upper()
+        try:
+            finding_index = severity_order.index(finding_severity)
+            if finding_index >= threshold_index:
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
 @app.command()
 def scan(
     targets: Optional[List[Path]] = typer.Argument(
@@ -356,6 +389,7 @@ def scan(
     sbom: bool = typer.Option(False, "--sbom", help="Scan dependencies + generate SBOM (Trivy)"),
     compliance: bool = typer.Option(False, "--compliance", help="Run IaC compliance scanner (Checkov)"),
     all_scanners: bool = typer.Option(False, "--all", help="Run all scanners (SBOM + SAST + Compliance)"),
+    auto: bool = typer.Option(False, "--auto", help="Auto-detect project type and select appropriate scanners"),
     images: Optional[List[str]] = typer.Option(None, "--images", help="Docker image(s) to scan (e.g., nginx:latest python:3.11)"),
     images_file: Optional[Path] = typer.Option(None, "--images-file", help="File containing list of images (one per line)"),
     ignore: Optional[List[str]] = typer.Option(None, "--ignore", help="Path patterns to ignore (regex, can be specified multiple times)"),
@@ -363,6 +397,8 @@ def scan(
     json_path: Optional[Path] = typer.Option(None, "--json", help="Path to JSON output file"),
     sarif_path: Optional[Path] = typer.Option(None, "--sarif", help="Path to SARIF output file"),
     sbom_path: Optional[Path] = typer.Option(None, "--sbom-output", help="Path to SBOM output file"),
+    csv_path: Optional[Path] = typer.Option(None, "--csv", help="Path to CSV output file"),
+    tsv_path: Optional[Path] = typer.Option(None, "--tsv", help="Path to TSV output file"),
     flat: bool = typer.Option(False, "--flat", help="Use flat array format (default: structured from config)"),
     per_tool_files: bool = typer.Option(False, "--per-tool-files", help="Generate individual output files per tool"),
     config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config file"),
@@ -373,12 +409,17 @@ def scan(
     commit_hash: Optional[str] = typer.Option(None, "--commit-hash", help="Git commit hash (default: auto-detect from git)"),
     # Production/CI-CD features
     fail_on: Optional[str] = typer.Option(None, "--fail-on", help="Exit with code 1 if findings at or above this severity (CRITICAL|HIGH|MEDIUM|LOW|NONE)"),
+    fail_fast: bool = typer.Option(False, "--fail-fast", help="Exit immediately on first finding above --fail-on threshold (requires --fail-on)"),
+    blame: bool = typer.Option(False, "--blame", help="Add git blame attribution to findings (requires git repository)"),
     severity: Optional[str] = typer.Option(None, "--severity", help="Only report findings of these severities (comma-separated: CRITICAL,HIGH,MEDIUM,LOW,INFO)"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output (only summary and errors)"),
     timeout: Optional[int] = typer.Option(None, "--timeout", help="Overall scan timeout in seconds"),
     continue_on_error: bool = typer.Option(False, "--continue-on-error", help="Continue scan even if a scanner fails"),
     # Suppression baseline
     baseline: Optional[Path] = typer.Option(None, "--baseline", help="Suppression baseline file (.yavs-baseline.yaml) to filter findings"),
+    # Policy-as-Code
+    policy: Optional[List[Path]] = typer.Option(None, "--policy", "-p", help="Policy file or directory paths (can be specified multiple times)"),
+    policy_mode: str = typer.Option("enforce", "--policy-mode", help="Policy mode: enforce (fail on violations), audit (report only), off"),
 ):
     """
     Scan filesystem and/or Docker images for vulnerabilities.
@@ -436,8 +477,44 @@ def scan(
     if not per_tool_files:
         per_tool_files = config.get("output", {}).get("per_tool_files", False)
 
+    # Validate fail-fast requires fail-on
+    if fail_fast and not fail_on:
+        console.print("[red]✗ Error: --fail-fast requires --fail-on to specify severity threshold[/red]")
+        console.print("[yellow]Example: yavs scan --all --fail-on HIGH --fail-fast[/yellow]")
+        raise typer.Exit(2)
+
     if not quiet:
         print_banner(f"v{__version__} - Yet Another Vulnerability Scanner")
+
+    # Determine which directories to scan first (needed for auto-detect)
+    directories_to_scan = []
+
+    if targets:
+        # Use CLI arguments (convert to absolute paths)
+        directories_to_scan = [Path(t).resolve() for t in targets]
+    else:
+        # Use config directories
+        config_dirs = config.get("scan", {}).get("directories", ["."])
+        directories_to_scan = [Path(d).resolve() for d in config_dirs]
+
+    # Auto-detect scanners if requested
+    if auto:
+        from .utils.auto_detect import detect_project_type, get_scanner_categories
+
+        detected_scanners = detect_project_type(directories_to_scan[0])
+        categories = get_scanner_categories(detected_scanners)
+
+        if not quiet:
+            console.print(f"\n[bold cyan]Auto-Detection Results:[/bold cyan]")
+            console.print(f"  Target: {directories_to_scan[0]}")
+            console.print(f"  Detected scanners: {', '.join(sorted(detected_scanners)) if detected_scanners else 'none'}")
+            if detected_scanners:
+                console.print(f"  Scan modes: {', '.join(k for k, v in categories.items() if v)}")
+
+        # Override scanner flags based on detection
+        sast = sast or categories["sast"]
+        sbom = sbom or categories["sbom"]
+        compliance = compliance or categories["compliance"]
 
     # Determine which scanners to run
     scanners_to_run = []
@@ -445,9 +522,15 @@ def scan(
     if all_scanners:
         sast = sbom = compliance = True
 
-    if not any([sast, sbom, compliance]):
-        console.print("[yellow]No scanners specified. Use --all or specify --sbom, --sast, or --compliance[/yellow]")
+    if not any([sast, sbom, compliance, auto]):
+        console.print("[yellow]No scanners specified. Use --all, --auto, or specify --sbom, --sast, or --compliance[/yellow]")
         raise typer.Exit(2)  # Exit code 2 for configuration errors
+
+    if not any([sast, sbom, compliance]):
+        if auto:
+            console.print("[yellow]⚠ Auto-detection found no applicable scanners for this project[/yellow]")
+            console.print("[yellow]  Specify scanners manually: --sast, --sbom, or --compliance[/yellow]")
+        raise typer.Exit(2)
 
     # Run pre-flight checks - validate tools and configuration BEFORE starting any scans
     from .utils.preflight import run_preflight_checks
@@ -459,17 +542,6 @@ def scan(
         ai_enabled=ai_enabled,
         config=config
     )
-
-    # Determine which directories to scan
-    directories_to_scan = []
-
-    if targets:
-        # Use CLI arguments (convert to absolute paths)
-        directories_to_scan = [Path(t).resolve() for t in targets]
-    else:
-        # Use config directories
-        config_dirs = config.get("scan", {}).get("directories", ["."])
-        directories_to_scan = [Path(d).resolve() for d in config_dirs]
 
     # Combine ignore patterns from config and CLI
     ignore_patterns = config.get("scan", {}).get("ignore_paths", [])
@@ -554,6 +626,13 @@ def scan(
 
                             aggregator.add_findings(results)
 
+                            # Check for fail-fast after adding findings
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
                             # Count findings by category for display
                             dep_count = sum(1 for f in results if f.get("category") == "dependency")
                             secret_count = sum(1 for f in results if f.get("category") == "secret")
@@ -598,6 +677,14 @@ def scan(
                             # Register scanner (even if 0 findings)
                             aggregator.register_scanner("Semgrep", "sast", len(results))
                             aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
                             if not quiet:
                                 console.print(f"✓ Semgrep: {len(results)} finding(s)")
                         except Exception as e:
@@ -632,6 +719,14 @@ def scan(
                             # Register scanner (even if 0 findings)
                             aggregator.register_scanner("Bandit", "sast", len(results))
                             aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
                             if not quiet:
                                 console.print(f"✓ Bandit: {len(results)} finding(s)")
                         except Exception as e:
@@ -666,6 +761,14 @@ def scan(
                             # Register scanner (even if 0 findings)
                             aggregator.register_scanner("BinSkim", "sast", len(results))
                             aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
                             if not quiet:
                                 console.print(f"✓ BinSkim: {len(results)} finding(s)")
                         except Exception as e:
@@ -700,12 +803,104 @@ def scan(
                             # Register scanner (even if 0 findings)
                             aggregator.register_scanner("Checkov", "compliance", len(results))
                             aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
                             if not quiet:
                                 console.print(f"✓ Checkov: {len(results)} finding(s)")
                         except Exception as e:
                             # Register as failed
                             aggregator.register_scanner("Checkov", "compliance", 0, status="failed", error=str(e))
                             console.print(f"[red]✗ Checkov failed: {str(e)}[/red]")
+                            if not continue_on_error:
+                                console.print("[red]Scan failed. Use --continue-on-error to continue despite scanner failures.[/red]")
+                                raise typer.Exit(2)
+
+                    # Terrascan (IaC Compliance)
+                    if compliance and should_run_scanner_in_mode(config, active_mode, "terrascan"):
+                        try:
+                            if not quiet:
+                                status.update("[bold green]Running Terrascan (IaC)...")
+                            scanner = TerrascanScanner(
+                                target,
+                                timeout=config["scanners"].get("terrascan", {}).get("timeout", 300),
+                                extra_flags=config["scanners"].get("terrascan", {}).get("flags", ""),
+                                native_config=config["scanners"].get("terrascan", {}).get("native_config")
+                            )
+                            results = scanner.run()
+
+                            # Tag findings with filesystem source
+                            for finding in results:
+                                finding["source"] = f"filesystem:{target}"
+                                finding["source_type"] = "filesystem"
+
+                            # Filter findings based on ignore patterns
+                            results = filter_findings_by_ignore_patterns(results, ignore_patterns)
+
+                            # Register scanner (even if 0 findings)
+                            aggregator.register_scanner("Terrascan", "compliance", len(results))
+                            aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
+                            if not quiet:
+                                console.print(f"✓ Terrascan: {len(results)} finding(s)")
+                        except Exception as e:
+                            # Register as failed
+                            aggregator.register_scanner("Terrascan", "compliance", 0, status="failed", error=str(e))
+                            console.print(f"[red]✗ Terrascan failed: {str(e)}[/red]")
+                            if not continue_on_error:
+                                console.print("[red]Scan failed. Use --continue-on-error to continue despite scanner failures.[/red]")
+                                raise typer.Exit(2)
+
+                    # TemplateAnalyzer (Azure ARM/Bicep)
+                    if compliance and should_run_scanner_in_mode(config, active_mode, "template-analyzer"):
+                        try:
+                            if not quiet:
+                                status.update("[bold green]Running TemplateAnalyzer (ARM/Bicep)...")
+                            scanner = TemplateAnalyzerScanner(
+                                target,
+                                timeout=config["scanners"].get("template-analyzer", {}).get("timeout", 300),
+                                extra_flags=config["scanners"].get("template-analyzer", {}).get("flags", ""),
+                                native_config=config["scanners"].get("template-analyzer", {}).get("native_config")
+                            )
+                            results = scanner.run()
+
+                            # Tag findings with filesystem source
+                            for finding in results:
+                                finding["source"] = f"filesystem:{target}"
+                                finding["source_type"] = "filesystem"
+
+                            # Filter findings based on ignore patterns
+                            results = filter_findings_by_ignore_patterns(results, ignore_patterns)
+
+                            # Register scanner (even if 0 findings)
+                            aggregator.register_scanner("TemplateAnalyzer", "iac", len(results))
+                            aggregator.add_findings(results)
+
+                            # Check for fail-fast
+                            if fail_fast and fail_on and results:
+                                if should_fail_fast(aggregator.findings, fail_on):
+                                    console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                                    console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                                    raise typer.Exit(1)
+
+                            if not quiet:
+                                console.print(f"✓ TemplateAnalyzer: {len(results)} finding(s)")
+                        except Exception as e:
+                            # Register as failed
+                            aggregator.register_scanner("TemplateAnalyzer", "iac", 0, status="failed", error=str(e))
+                            console.print(f"[red]✗ TemplateAnalyzer failed: {str(e)}[/red]")
                             if not continue_on_error:
                                 console.print("[red]Scan failed. Use --continue-on-error to continue despite scanner failures.[/red]")
                                 raise typer.Exit(2)
@@ -764,6 +959,13 @@ def scan(
 
                     aggregator.add_findings(results)
 
+                    # Check for fail-fast
+                    if fail_fast and fail_on and results:
+                        if should_fail_fast(aggregator.findings, fail_on):
+                            console.print(f"\n[red]✗ {fail_on.upper()}+ finding detected - failing fast[/red]")
+                            console.print(f"[yellow]Found {len(aggregator.findings)} total finding(s) before early exit[/yellow]")
+                            raise typer.Exit(1)
+
                     # Count findings
                     dep_count = sum(1 for f in results if f.get("category") == "dependency")
                     secret_count = sum(1 for f in results if f.get("category") == "secret")
@@ -800,7 +1002,24 @@ def scan(
                     suppressions = baseline_data.get('suppressions', [])
 
                 if suppressions:
-                    suppressed_ids = {s['id'] for s in suppressions}
+                    # Filter out expired suppressions
+                    today = datetime.now().date()
+                    active_suppressions = []
+                    expired_suppressions = []
+
+                    for s in suppressions:
+                        if 'expires' in s and s['expires']:
+                            try:
+                                expiry_date = datetime.strptime(s['expires'], '%Y-%m-%d').date()
+                                if expiry_date < today:
+                                    expired_suppressions.append(s)
+                                    continue
+                            except (ValueError, TypeError):
+                                # Invalid date format, treat as active
+                                pass
+                        active_suppressions.append(s)
+
+                    suppressed_ids = {s['id'] for s in active_suppressions}
                     original_count = len(findings)
 
                     # Filter findings by suppressed IDs
@@ -817,7 +1036,11 @@ def scan(
                     if not quiet:
                         console.print(f"\n[bold cyan]Suppression Baseline:[/bold cyan]")
                         console.print(f"  Baseline: {baseline}")
-                        console.print(f"  Suppressions: {len(suppressed_ids)}")
+                        console.print(f"  Suppressions: {len(suppressed_ids)} active")
+                        if expired_suppressions:
+                            console.print(f"  [yellow]Expired: {len(expired_suppressions)} (now active)[/yellow]")
+                            for exp in expired_suppressions:
+                                console.print(f"    - {exp['id']} (expired: {exp.get('expires')})")
                         console.print(f"  Total findings: {original_count}")
                         console.print(f"  After filtering: {len(findings)}")
                         console.print(f"  Suppressed: {filtered_count}")
@@ -827,6 +1050,74 @@ def scan(
             except Exception as e:
                 console.print(f"[yellow]Warning: Failed to load baseline: {str(e)}[/yellow]")
                 console.print("[yellow]Continuing with all findings...[/yellow]")
+
+        # Enrich findings with git blame if requested
+        if blame:
+            from .utils.git_blame import enrich_findings_with_blame, get_git_root
+
+            repo_root = get_git_root(directories_to_scan[0])
+            if repo_root:
+                if not quiet:
+                    console.print(f"\n[cyan]Enriching findings with git blame...[/cyan]")
+                findings = enrich_findings_with_blame(findings, repo_root)
+                aggregator.findings = findings
+                enriched_count = sum(1 for f in findings if 'git_blame' in f)
+                if not quiet:
+                    console.print(f"  Added git blame to {enriched_count} finding(s)")
+            else:
+                if not quiet:
+                    console.print(f"[yellow]⚠ Not a git repository, skipping git blame[/yellow]")
+
+        # Apply policy-as-code evaluation
+        if policy and policy_mode != "off":
+            from .policy import PolicyEngine
+
+            if not quiet:
+                console.print(f"\n[cyan]Loading and applying policies...[/cyan]")
+
+            try:
+                engine = PolicyEngine(policy)
+                policy_count = len(engine.policies)
+                rule_count = sum(len(p.rules) for p in engine.policies)
+
+                if not quiet:
+                    console.print(f"  Loaded {policy_count} policy file(s) with {rule_count} rule(s)")
+
+                # Apply policies to findings
+                findings = engine.evaluate(findings)
+                aggregator.findings = findings
+
+                # Count policy actions
+                suppressed = sum(1 for f in findings if f.get("suppressed_by_policy"))
+                violations = [f for f in findings if f.get("policy_violation")]
+                warnings = sum(1 for f in findings if f.get("policy_warning"))
+                tagged = sum(1 for f in findings if f.get("policy_tags"))
+
+                if not quiet:
+                    if suppressed > 0:
+                        console.print(f"  Suppressed: {suppressed} finding(s)")
+                    if violations:
+                        console.print(f"  [red]Violations: {len(violations)} finding(s)[/red]")
+                    if warnings > 0:
+                        console.print(f"  [yellow]Warnings: {warnings} finding(s)[/yellow]")
+                    if tagged > 0:
+                        console.print(f"  Tagged: {tagged} finding(s)")
+
+                # Check for policy violations in enforce mode
+                if violations and policy_mode == "enforce":
+                    console.print(f"\n[red]✗ {len(violations)} policy violation(s) detected![/red]")
+                    for v in violations[:5]:  # Show first 5
+                        console.print(f"  - {v.get('file', 'unknown')}:{v.get('line', 0)} - {v.get('title', 'Unknown')}")
+                    if len(violations) > 5:
+                        console.print(f"  ... and {len(violations) - 5} more")
+                    raise typer.Exit(1)
+
+            except Exception as e:
+                console.print(f"[red]✗ Policy evaluation failed: {str(e)}[/red]")
+                if policy_mode == "enforce":
+                    raise typer.Exit(2)
+                else:
+                    console.print("[yellow]Continuing in audit mode...[/yellow]")
 
         # Display statistics
         stats = aggregator.get_statistics()
@@ -1002,6 +1293,26 @@ def scan(
         )
         if not quiet:
             console.print(f"✓ SARIF: {sarif_output}")
+
+        # CSV export (if requested)
+        if csv_path:
+            csv_output = Path(csv_path)
+            try:
+                export_to_csv(findings, csv_output, include_bom=True)
+                if not quiet:
+                    console.print(f"✓ CSV: {csv_output}")
+            except Exception as e:
+                console.print(f"[yellow]⚠ CSV export failed: {str(e)}[/yellow]")
+
+        # TSV export (if requested)
+        if tsv_path:
+            tsv_output = Path(tsv_path)
+            try:
+                export_to_tsv(findings, tsv_output, include_bom=True)
+                if not quiet:
+                    console.print(f"✓ TSV: {tsv_output}")
+            except Exception as e:
+                console.print(f"[yellow]⚠ TSV export failed: {str(e)}[/yellow]")
 
         # Validate SARIF
         if validate and not quiet:
@@ -1562,6 +1873,7 @@ def tools_status():
     """
     import subprocess  # nosec B404 - Safe: hardcoded command, no user input
     from rich.table import Table
+    from .utils.scanner_installer import find_trivy_binary
 
     print_banner("Scanner Tool Versions")
     console.print()
@@ -1571,26 +1883,60 @@ def tools_status():
     table.add_column("Version", width=30)
     table.add_column("Status", width=15)
 
-    tools = [
-        ("Trivy", ["trivy", "--version"]),
+    # Check Trivy using find_trivy_binary()
+    trivy_path = find_trivy_binary()
+    if trivy_path:
+        try:
+            result = subprocess.run([trivy_path, "--version"], capture_output=True, text=True, timeout=5)  # nosec B603 - Safe: hardcoded command
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                version = None
+                for line in output.split('\n'):
+                    if line.startswith('Version:'):
+                        version = line.split(':', 1)[1].strip()
+                        break
+                if version:
+                    table.add_row("Trivy", version, "[green]✓ Installed[/green]")
+                else:
+                    table.add_row("Trivy", "[dim]—[/dim]", "[yellow]⚠ Version unknown[/yellow]")
+            else:
+                table.add_row("Trivy", "[dim]—[/dim]", "[red]✗ Not found[/red]")
+        except Exception:
+            table.add_row("Trivy", "[dim]—[/dim]", "[red]✗ Error[/red]")
+    else:
+        table.add_row("Trivy", "[dim]—[/dim]", "[red]✗ Not installed[/red]")
+
+    # Check Python tools
+    python_tools = [
         ("Semgrep", ["semgrep", "--version"]),
         ("Bandit", ["bandit", "--version"]),
         ("Checkov", ["checkov", "--version"]),
-        ("BinSkim", ["binskim", "--version"]),
     ]
 
-    for tool_name, cmd in tools:
+    for tool_name, cmd in python_tools:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)  # nosec B603 - Safe: hardcoded command, no user input
             if result.returncode == 0:
-                # Extract version from output
+                # Extract version from output (first line)
                 output = result.stdout.strip() or result.stderr.strip()
-                version = output.split('\n')[0]  # First line usually has version
+                version = output.split('\n')[0]
                 table.add_row(tool_name, version, "[green]✓ Installed[/green]")
             else:
                 table.add_row(tool_name, "[dim]—[/dim]", "[red]✗ Not found[/red]")
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
             table.add_row(tool_name, "[dim]—[/dim]", "[red]✗ Not installed[/red]")
+
+    # Check BinSkim (optional)
+    try:
+        result = subprocess.run(["binskim", "--version"], capture_output=True, text=True, timeout=5)  # nosec B603 - Safe: hardcoded command
+        if result.returncode == 0:
+            output = result.stdout.strip() or result.stderr.strip()
+            version = output.split('\n')[0]
+            table.add_row("BinSkim", version, "[green]✓ Installed[/green]")
+        else:
+            table.add_row("BinSkim", "[dim]—[/dim]", "[red]✗ Not installed[/red]")
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        table.add_row("BinSkim", "[dim]—[/dim]", "[red]✗ Not installed[/red]")
 
     console.print(table)
     console.print()
@@ -1814,22 +2160,22 @@ def tools_pin(
             from .utils.subprocess_runner import run_command
             returncode, stdout, stderr = run_command(f"{trivy_path} --version", check=False, timeout=5)
             if returncode == 0:
-                # Parse version from output (e.g., "Version: 0.67.2")
+                # Parse version from output - look for first line starting with "Version:"
+                trivy_version = None
                 for line in stdout.strip().split('\n'):
-                    if 'Version:' in line or 'version' in line.lower():
-                        parts = line.split()
-                        for part in parts:
-                            if part[0].isdigit():
-                                trivy_version = part
-                                tested = get_tested_version("trivy")
-                                is_tested = (trivy_version == tested)
-                                tool_versions["trivy"] = {
-                                    "version": trivy_version,
-                                    "tested": is_tested,
-                                    "path": trivy_path
-                                }
-                                console.print(f"[green]✓ Trivy: {trivy_version}{' (tested)' if is_tested else ''}[/green]")
-                                break
+                    if line.startswith('Version:'):
+                        trivy_version = line.split(':', 1)[1].strip()
+                        break
+
+                if trivy_version:
+                    tested = get_tested_version("trivy")
+                    is_tested = (trivy_version == tested)
+                    tool_versions["trivy"] = {
+                        "version": trivy_version,
+                        "tested": is_tested,
+                        "path": trivy_path
+                    }
+                    console.print(f"[green]✓ Trivy: {trivy_version}{' (tested)' if is_tested else ''}[/green]")
         except Exception as e:
             console.print(f"[yellow]⚠ Could not determine Trivy version[/yellow]")
     else:
@@ -1961,15 +2307,12 @@ def tools_check():
             from .utils.subprocess_runner import run_command
             returncode, stdout, stderr = run_command(f"{trivy_path} --version", check=False, timeout=5)
             if returncode == 0:
-                # Parse version
+                # Parse version - look for first line starting with "Version:"
                 trivy_version = None
                 for line in stdout.strip().split('\n'):
-                    if 'Version:' in line or 'version' in line.lower():
-                        parts = line.split()
-                        for part in parts:
-                            if part[0].isdigit():
-                                trivy_version = part
-                                break
+                    if line.startswith('Version:'):
+                        trivy_version = line.split(':', 1)[1].strip()
+                        break
 
                 if trivy_version:
                     tested_ver = get_tested_version("trivy")
@@ -2803,18 +3146,35 @@ def ignore_add(
     finding_id: str = typer.Argument(..., help="Finding ID to suppress (CVE, CWE, rule ID)"),
     reason: Optional[str] = typer.Option(None, "-r", "--reason", help="Reason for suppression"),
     baseline: Path = typer.Option(Path(".yavs-baseline.yaml"), "-b", "--baseline", help="Baseline file path"),
+    expires: Optional[str] = typer.Option(None, "--expires", help="Expiration date (YYYY-MM-DD)"),
+    owner: Optional[str] = typer.Option(None, "--owner", help="Owner/assignee for this suppression"),
 ):
     """
     Add a finding to the suppression baseline.
 
     Suppressed findings will be filtered out of future scans when using --baseline flag.
+    Optionally set an expiration date for time-bound suppressions (tech debt management).
 
     Examples:
         yavs ignore add CVE-2023-1234 --reason "False positive"
         yavs ignore add CWE-89 --reason "Sanitized in production"
-        yavs ignore add semgrep.rule-123 -r "Accepted risk"
+        yavs ignore add semgrep.rule-123 -r "Accepted risk" --expires 2025-12-31
+        yavs ignore add bandit.B201 --expires 2025-03-01 --owner john --reason "Fix planned for Q1"
     """
     print_banner("Add to Baseline")
+
+    # Validate expiration date if provided
+    if expires:
+        try:
+            expiry_date = datetime.strptime(expires, '%Y-%m-%d')
+            # Check if date is in the past
+            if expiry_date.date() < datetime.now().date():
+                console.print(f"[red]✗ Expiration date cannot be in the past: {expires}[/red]")
+                raise typer.Exit(1)
+        except ValueError:
+            console.print(f"[red]✗ Invalid date format: {expires}[/red]")
+            console.print("[yellow]Expected format: YYYY-MM-DD (e.g., 2025-12-31)[/yellow]")
+            raise typer.Exit(1)
 
     # Load existing baseline
     suppressions = []
@@ -2841,6 +3201,13 @@ def ignore_add(
         'added_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'added_by': os.environ.get('USER', 'unknown')
     }
+
+    # Add optional fields
+    if expires:
+        new_suppression['expires'] = expires
+    if owner:
+        new_suppression['owner'] = owner
+
     suppressions.append(new_suppression)
 
     # Write baseline
@@ -2945,33 +3312,74 @@ def ignore_list(
         console.print(f"[yellow]No suppressions in baseline: {baseline}[/yellow]")
         return
 
+    # Check for expired suppressions
+    today = datetime.now().date()
+    active = []
+    expired = []
+
+    for s in suppressions:
+        if 'expires' in s and s['expires']:
+            try:
+                expiry_date = datetime.strptime(s['expires'], '%Y-%m-%d').date()
+                if expiry_date < today:
+                    expired.append(s)
+                    continue
+            except (ValueError, TypeError):
+                pass
+        active.append(s)
+
     console.print(f"[cyan]Baseline: {baseline}[/cyan]")
-    console.print(f"[dim]Total suppressions: {len(suppressions)}[/dim]")
+    console.print(f"[dim]Total suppressions: {len(suppressions)} ({len(active)} active, {len(expired)} expired)[/dim]")
     console.print()
 
     if show_details:
         # Detailed table
         table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("ID", style="bold", width=25)
-        table.add_column("Reason", width=35)
-        table.add_column("Added By", width=12)
-        table.add_column("Date", width=18)
+        table.add_column("ID", style="bold", width=20)
+        table.add_column("Reason", width=30)
+        table.add_column("Owner", width=10)
+        table.add_column("Added By", width=10)
+        table.add_column("Date", width=16)
+        table.add_column("Expires", width=12)
+        table.add_column("Status", width=10)
 
         for s in suppressions:
+            status = "✓ Active"
+            status_style = "green"
+
+            if s in expired:
+                status = "⚠ Expired"
+                status_style = "yellow"
+
             table.add_row(
                 s['id'],
                 s.get('reason', 'N/A'),
+                s.get('owner', '-'),
                 s.get('added_by', 'N/A'),
-                s.get('added_date', 'N/A')
+                s.get('added_date', 'N/A'),
+                s.get('expires', '-'),
+                f"[{status_style}]{status}[/{status_style}]"
             )
 
         console.print(table)
     else:
         # Simple list
-        for s in suppressions:
-            console.print(f"  • {s['id']}")
-            if s.get('reason'):
-                console.print(f"    [dim]{s['reason']}[/dim]")
+        if active:
+            console.print("[green]Active Suppressions:[/green]")
+            for s in active:
+                console.print(f"  • {s['id']}")
+                if s.get('reason'):
+                    console.print(f"    [dim]{s['reason']}[/dim]")
+                if s.get('expires'):
+                    console.print(f"    [dim]Expires: {s['expires']}[/dim]")
+
+        if expired:
+            console.print()
+            console.print("[yellow]Expired Suppressions:[/yellow]")
+            for s in expired:
+                console.print(f"  • {s['id']} [dim](expired: {s.get('expires')})[/dim]")
+                if s.get('reason'):
+                    console.print(f"    [dim]{s['reason']}[/dim]")
 
 
 @ignore_app.command("clear")
@@ -3448,18 +3856,23 @@ def show_full_man():
     Manage scanner tools (install, check, upgrade, pin versions).
 
     Subcommands:
-      yavs tools install            # Install scanner tools
+      yavs tools install            # Install scanner tools (tested versions)
       yavs tools status             # Check scanner versions
-      yavs tools upgrade            # Update all scanners
-      yavs tools pin                # Pin versions to requirements file
+      yavs tools check              # Validate version compatibility
+      yavs tools upgrade            # Update scanners (safe ranges)
+      yavs tools pin                # Pin versions to lock file
 
     Examples:
-      yavs tools install            # Install all tools
-      yavs tools install --use-brew # Use package manager for Trivy
-      yavs tools status             # Check current versions
-      yavs tools upgrade            # Upgrade all scanners
-      yavs tools upgrade -y         # Upgrade without confirmation
-      yavs tools pin                # Create requirements-scanners.txt
+      yavs tools install                       # Install all tools (tested versions)
+      yavs tools install --tool trivy          # Install specific tool
+      yavs tools install --tool trivy --version 0.67.2  # Install exact version
+      yavs tools status                        # Check current versions
+      yavs tools check                         # Validate compatibility
+      yavs tools upgrade                       # Upgrade within safe ranges
+      yavs tools upgrade --tool semgrep        # Upgrade specific tool
+      yavs tools upgrade --latest              # Upgrade to absolute latest
+      yavs tools pin                           # Create .yavs-tools.lock
+      yavs tools pin --format requirements     # Create requirements-scanners.txt
 
 ### config
     Manage YAVS configuration files.
@@ -4108,14 +4521,23 @@ Manage scanner tools (install, check, upgrade, pin).
 ### Subcommands
 
 #### tools install
-Install scanner dependencies.
+Install scanner dependencies with tested versions.
 
-    yavs tools install                 # Install all tools
-    yavs tools install --use-brew      # Use package manager for Trivy
-    yavs tools install --no-trivy      # Only install Python tools
-    yavs tools install --force         # Force reinstall
+    yavs tools install                                    # Install all tools (tested versions)
+    yavs tools install --tool trivy                       # Install specific tool
+    yavs tools install --tool trivy --version 0.67.2      # Install exact version
+    yavs tools install --tool semgrep --version 1.142.1   # Install specific tool version
+    yavs tools install --use-brew                         # Use package manager for Trivy
+    yavs tools install --no-trivy                         # Only install Python tools
+    yavs tools install --force                            # Force reinstall
 
 Installs: Trivy, Semgrep, Bandit, Checkov
+
+**Tested Versions (Nov 2025):**
+- Trivy: 0.67.2
+- Semgrep: 1.142.1
+- Bandit: 1.8.6
+- Checkov: 3.2.492
 
 #### tools status
 Check versions of all installed scanner tools.
@@ -4125,22 +4547,50 @@ Check versions of all installed scanner tools.
 Shows current versions of: Trivy, Semgrep, Bandit, Checkov, BinSkim
 
 #### tools upgrade
-Update all scanner tools to their latest versions.
+Update scanner tools within tested version ranges or to latest.
 
-    yavs tools upgrade
-    yavs tools upgrade -y  # Skip confirmation
+    yavs tools upgrade                       # Update all tools (safe ranges)
+    yavs tools upgrade --tool semgrep        # Update specific tool
+    yavs tools upgrade --tool trivy          # Update Trivy to tested version
+    yavs tools upgrade --latest              # Upgrade to absolute latest (may be untested)
+    yavs tools upgrade --tool trivy --latest # Upgrade specific tool to latest
+    yavs tools upgrade -y                    # Skip confirmation
 
-Updates: Semgrep, Bandit, Checkov (via pip)
-Note: Trivy must be updated via system package manager
+By default, upgrades to tested versions within safe ranges.
+Use --latest to upgrade to absolute latest versions (may be untested).
+Use --tool to upgrade a specific scanner.
+
+Updates: Trivy, Semgrep, Bandit, Checkov
+
+#### tools check
+Validate installed tool versions against tested ranges.
+
+    yavs tools check
+
+Shows compatibility status for each installed tool:
+- ✓ Tested version (recommended)
+- ⚠ Compatible (not tested)
+- ✗ Outside tested range
+
+Non-blocking: Scans will run with warnings if versions are incompatible.
 
 #### tools pin
-Create requirements file with current scanner tool versions.
+Pin current tool versions to lock file for reproducibility.
 
-    yavs tools pin
-    yavs tools pin -o my-requirements.txt
+    yavs tools pin                                    # Create .yavs-tools.lock
+    yavs tools pin -o my-tools.lock                   # Custom output path
+    yavs tools pin --format lock                      # YAML format (default)
+    yavs tools pin --format requirements              # pip requirements format
+    yavs tools pin --format requirements -o reqs.txt  # Custom requirements file
 
-Generates requirements-scanners.txt with pinned versions for reproducible builds.
-Commit this file to lock scanner versions across team and CI/CD.
+Creates lock file with all installed tool versions including Trivy.
+
+**Lock file formats:**
+- `lock` (default): `.yavs-tools.lock` in YAML format with metadata
+- `requirements`: `requirements-scanners.txt` in pip format
+
+Commit lock files to version control for reproducible builds across team and CI/CD.
+Use `yavs tools install` to install from lock file.
 
 ## config
 Manage YAVS configuration files.

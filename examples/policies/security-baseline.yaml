@@ -1,0 +1,61 @@
+version: "1.0"
+name: "Security Baseline"
+description: "Enterprise security baseline policies"
+
+rules:
+  - id: "SEC-001"
+    name: "Auto-suppress low severity info findings"
+    description: "Automatically suppress informational findings"
+    enabled: true
+    conditions:
+      - field: "severity"
+        operator: "in"
+        value: ["INFO", "LOW"]
+    action: "suppress"
+    reason: "Low severity findings auto-suppressed by policy"
+
+  - id: "SEC-002"
+    name: "Fail on critical vulnerabilities"
+    description: "Fail builds with critical findings"
+    enabled: true
+    conditions:
+      - field: "severity"
+        operator: "equals"
+        value: "CRITICAL"
+    action: "fail"
+    action_config:
+      fail_build: true
+
+  - id: "SEC-003"
+    name: "Suppress test file findings"
+    description: "Ignore findings in test directories"
+    enabled: true
+    conditions:
+      - field: "file"
+        operator: "contains"
+        value: "/test/"
+        case_sensitive: false
+    action: "suppress"
+    reason: "Test files excluded by policy"
+
+  - id: "SEC-004"
+    name: "Tag SQL injection findings"
+    description: "Tag all SQL injection vulnerabilities"
+    enabled: true
+    conditions:
+      - field: "title"
+        operator: "regex"
+        value: "(?i)sql.*injection"
+    action: "tag"
+    tags: ["sql-injection", "high-priority"]
+
+  - id: "SEC-005"
+    name: "Suppress findings in vendor directories"
+    description: "Ignore findings in third-party code"
+    enabled: true
+    conditions:
+      - field: "file"
+        operator: "regex"
+        value: "/(vendor|node_modules|venv|\.venv)/"
+    action: "suppress"
+    reason: "Third-party code excluded by policy"

@@ -1,0 +1,66 @@
+version: "1.0"
+name: "PCI-DSS Compliance"
+description: "PCI-DSS 3.2.1 compliance policies"
+
+settings:
+  compliance_framework: "PCI-DSS"
+  version: "3.2.1"
+
+rules:
+  - id: "PCI-6.5.1"
+    name: "Injection flaws"
+    description: "PCI requirement 6.5.1 - Prevent injection flaws"
+    enabled: true
+    conditions:
+      - field: "category"
+        operator: "in"
+        value: ["injection", "sql-injection", "command-injection", "xss"]
+    action: "fail"
+    action_config:
+      fail_build: true
+    reason: "PCI-DSS 6.5.1 violation"
+
+  - id: "PCI-6.5.3"
+    name: "Insecure cryptographic storage"
+    description: "PCI requirement 6.5.3 - Secure cryptographic storage"
+    enabled: true
+    conditions:
+      - field: "rule_id"
+        operator: "regex"
+        value: ".*crypt.*"
+        case_sensitive: false
+    action: "fail"
+    reason: "PCI-DSS 6.5.3 violation"
+
+  - id: "PCI-6.5.4"
+    name: "Insecure communications"
+    description: "PCI requirement 6.5.4 - Secure communications"
+    enabled: true
+    conditions:
+      - field: "description"
+        operator: "regex"
+        value: "(?i)(ssl|tls|https|certificate)"
+    action: "warn"
+    reason: "PCI-DSS 6.5.4 - Review communication security"
+
+  - id: "PCI-6.5.8"
+    name: "Improper access control"
+    description: "PCI requirement 6.5.8 - Proper access control"
+    enabled: true
+    conditions:
+      - field: "title"
+        operator: "regex"
+        value: "(?i)(access.*control|authori[zs]ation|permission)"
+    action: "fail"
+    reason: "PCI-DSS 6.5.8 violation"
+
+  - id: "PCI-6.5.10"
+    name: "Broken authentication and session management"
+    description: "PCI requirement 6.5.10 - Secure authentication"
+    enabled: true
+    conditions:
+      - field: "title"
+        operator: "regex"
+        value: "(?i)(authentication|session|password|token)"
+    action: "fail"
+    reason: "PCI-DSS 6.5.10 violation"

@@ -251,3 +251,51 @@ class TestBinSkimScanner:
         assert finding["rule_id"] == "BA2002"
         assert finding["message"] == "Binary not compiled with stack protection"
         assert finding["line"] is None  # Binary analysis doesn't have line numbers
+
+
+class TestNewScanners:
+    """Test new scanner implementations (TemplateAnalyzer, Terrascan)."""
+
+    def test_scanners_inherit_from_base(self):
+        """Test that new scanners properly inherit from BaseScanner."""
+        from yavs.scanners.template_analyzer import TemplateAnalyzerScanner
+        from yavs.scanners.terrascan import TerrascanScanner
+
+        assert issubclass(TemplateAnalyzerScanner, BaseScanner)
+        assert issubclass(TerrascanScanner, BaseScanner)
+
+    def test_template_analyzer_metadata(self):
+        """Test TemplateAnalyzer scanner metadata."""
+        from yavs.scanners.template_analyzer import TemplateAnalyzerScanner
+
+        scanner = TemplateAnalyzerScanner(Path("."))
+        assert scanner.tool_name == "template-analyzer"
+        assert scanner.category == "iac"
+
+    def test_terrascan_metadata(self):
+        """Test Terrascan scanner metadata."""
+        from yavs.scanners.terrascan import TerrascanScanner
+
+        scanner = TerrascanScanner(Path("."))
+        assert scanner.tool_name == "terrascan"
+        assert scanner.category == "compliance"
+
+    def test_new_scanners_have_required_methods(self):
+        """Test new scanners implement required methods."""
+        from yavs.scanners.template_analyzer import TemplateAnalyzerScanner
+        from yavs.scanners.terrascan import TerrascanScanner
+
+        template_scanner = TemplateAnalyzerScanner(Path("."))
+        terrascan_scanner = TerrascanScanner(Path("."))
+
+        # Both should have parse_output
+        assert hasattr(template_scanner, 'parse_output')
+        assert hasattr(terrascan_scanner, 'parse_output')
+        assert callable(template_scanner.parse_output)
+        assert callable(terrascan_scanner.parse_output)
+
+        # Both should have get_command
+        assert hasattr(template_scanner, 'get_command')
+        assert hasattr(terrascan_scanner, 'get_command')
+        assert callable(template_scanner.get_command)
+        assert callable(terrascan_scanner.get_command)

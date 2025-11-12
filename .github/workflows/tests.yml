@@ -1,0 +1,282 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+        exclude:
+          # Reduce matrix size - only test all Python versions on Ubuntu
+          - os: macos-latest
+            python-version: '3.9'
+          - os: macos-latest
+            python-version: '3.10'
+          - os: windows-latest
+            python-version: '3.9'
+          - os: windows-latest
+            python-version: '3.10'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov pytest-xdist pytest-timeout
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --cov=src/yavs \
+            --cov-report=xml \
+            --cov-report=term \
+            --junitxml=junit/unit-test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml \
+            --timeout=30 \
+            -n auto
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: junit/unit-test-results-*.xml
+          retention-days: 30
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: unit-tests-py${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git blame tests
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install YAVS
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov pytest-timeout
+
+      - name: Install scanner dependencies
+        run: |
+          # Install scanners needed for integration tests
+          pip install bandit semgrep safety
+
+          # Install trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Verify scanner installation
+        run: |
+          bandit --version || echo "Bandit not available"
+          semgrep --version || echo "Semgrep not available"
+          trivy --version || echo "Trivy not available"
+          safety --version || echo "Safety not available"
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ \
+            -v \
+            --cov=src/yavs \
+            --cov-append \
+            --cov-report=xml \
+            --cov-report=term \
+            --junitxml=junit/integration-test-results-py${{ matrix.python-version }}.xml \
+            --timeout=120
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results-py${{ matrix.python-version }}
+          path: junit/integration-test-results-*.xml
+          retention-days: 30
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: integration
+          name: integration-tests-py${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    if: always()
+
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: 'test-results/**/*.xml'
+          check_name: 'Test Results'
+          comment_title: 'Test Results'
+          compare_to_earlier_commit: true
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "# Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Count test files
+          UNIT_TESTS=$(find test-results -name 'unit-test-results-*.xml' | wc -l)
+          INTEGRATION_TESTS=$(find test-results -name 'integration-test-results-*.xml' | wc -l)
+
+          echo "## Test Execution" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unit Test Runs**: ${UNIT_TESTS}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Integration Test Runs**: ${INTEGRATION_TESTS}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Test Categories" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Unit Tests**: Fast, isolated component tests (including policy engine tests)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Integration Tests**: End-to-end workflow tests (including policy integration)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.unit-tests.result }}" == "success" ] && \
+             [ "${{ needs.integration-tests.result }}" == "success" ]; then
+            echo "## ✅ All Tests Passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Some Tests Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Unit Tests: ${{ needs.unit-tests.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Integration Tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  all-tests:
+    name: All Tests (Full Suite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install YAVS and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-cov pytest-xdist pytest-timeout
+
+      - name: Install all scanners
+        run: |
+          pip install bandit semgrep safety
+
+          # Install trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Run all tests with coverage
+        run: |
+          pytest tests/ \
+            -v \
+            --cov=src/yavs \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --junitxml=junit/all-test-results.xml \
+            --timeout=120 \
+            -n auto
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          coverage report | tee coverage-report.txt
+
+          COVERAGE=$(grep TOTAL coverage-report.txt | awk '{print $NF}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage-report.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload all test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-test-results
+          path: |
+            junit/all-test-results.xml
+            coverage-report.txt
+            htmlcov/
+          retention-days: 30
+
+      - name: Upload full coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: full-suite
+          name: all-tests
+          fail_ci_if_error: false

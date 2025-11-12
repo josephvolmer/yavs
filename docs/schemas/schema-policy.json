@@ -1,0 +1,210 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://yavs.dev/schemas/policy-v1.0.json",
+  "title": "YAVS Policy File",
+  "description": "Schema for YAVS Policy-as-Code configuration files. Defines security governance rules that automatically suppress, fail, warn, or tag findings based on conditions.",
+  "type": "object",
+  "required": ["version", "name", "rules"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Policy schema version",
+      "enum": ["1.0"],
+      "default": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable policy pack name",
+      "examples": ["Security Baseline", "PCI-DSS Compliance", "Team Policy"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional detailed description of the policy pack"
+    },
+    "settings": {
+      "type": "object",
+      "description": "Global policy settings and metadata",
+      "properties": {
+        "compliance_framework": {
+          "type": "string",
+          "description": "Compliance framework name (e.g., PCI-DSS, HIPAA, SOC2)",
+          "examples": ["PCI-DSS", "HIPAA", "SOC2", "ISO27001"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Framework version (e.g., 3.2.1)"
+        }
+      },
+      "additionalProperties": true
+    },
+    "rules": {
+      "type": "array",
+      "description": "List of policy rules to evaluate",
+      "items": {
+        "$ref": "#/definitions/PolicyRule"
+      }
+    }
+  },
+  "definitions": {
+    "PolicyRule": {
+      "type": "object",
+      "required": ["id", "name", "conditions", "action"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique rule identifier (e.g., SEC-001, PCI-6.5.1)",
+          "pattern": "^[A-Z0-9-_.]+$",
+          "examples": ["SEC-001", "PCI-6.5.1", "CUSTOM-SQL-001"]
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable rule name",
+          "examples": ["Auto-suppress low severity", "Fail on SQL injection"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional detailed rule description"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether rule is active",
+          "default": true
+        },
+        "conditions": {
+          "type": "array",
+          "description": "List of conditions that must all match (AND logic)",
+          "items": {
+            "$ref": "#/definitions/PolicyCondition"
+          },
+          "minItems": 1
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to take when rule matches",
+          "enum": ["suppress", "fail", "warn", "tag"],
+          "examples": ["suppress"]
+        },
+        "action_config": {
+          "type": "object",
+          "description": "Action-specific configuration",
+          "properties": {
+            "fail_build": {
+              "type": "boolean",
+              "description": "For 'fail' action: whether to fail the build",
+              "default": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "severity_override": {
+          "type": "string",
+          "description": "Override finding severity",
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags to apply to matching findings (for 'tag' action)",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["sql-injection", "high-priority"]]
+        },
+        "owner": {
+          "type": "string",
+          "description": "Team or person responsible for this rule",
+          "examples": ["security-team", "john@company.com"]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for the rule (especially for suppress action)",
+          "examples": ["Low severity findings auto-suppressed by policy"]
+        }
+      }
+    },
+    "PolicyCondition": {
+      "type": "object",
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Finding field to match (supports dot notation for nested fields)",
+          "examples": ["severity", "tool", "file", "category", "git_blame.author"]
+        },
+        "operator": {
+          "type": "string",
+          "description": "Comparison operator",
+          "enum": ["equals", "contains", "regex", "gt", "lt", "in"],
+          "examples": ["equals"]
+        },
+        "value": {
+          "description": "Value to compare against (type depends on operator)",
+          "oneOf": [
+            {"type": "string"},
+            {"type": "number"},
+            {"type": "boolean"},
+            {"type": "array", "items": {"type": "string"}}
+          ],
+          "examples": ["CRITICAL", "test", ["LOW", "INFO"]]
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "description": "Whether comparison is case-sensitive (for string operations)",
+          "default": true
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "version": "1.0",
+      "name": "Security Baseline",
+      "description": "Enterprise security baseline policies",
+      "rules": [
+        {
+          "id": "SEC-001",
+          "name": "Auto-suppress low severity",
+          "enabled": true,
+          "conditions": [
+            {
+              "field": "severity",
+              "operator": "in",
+              "value": ["INFO", "LOW"]
+            }
+          ],
+          "action": "suppress",
+          "reason": "Low severity findings auto-suppressed by policy"
+        },
+        {
+          "id": "SEC-002",
+          "name": "Fail on critical",
+          "enabled": true,
+          "conditions": [
+            {
+              "field": "severity",
+              "operator": "equals",
+              "value": "CRITICAL"
+            }
+          ],
+          "action": "fail",
+          "action_config": {
+            "fail_build": true
+          }
+        },
+        {
+          "id": "SEC-003",
+          "name": "Tag SQL injection",
+          "enabled": true,
+          "conditions": [
+            {
+              "field": "title",
+              "operator": "regex",
+              "value": "(?i)sql.*injection"
+            }
+          ],
+          "action": "tag",
+          "tags": ["sql-injection", "high-priority"]
+        }
+      ]
+    }
+  ]
+}

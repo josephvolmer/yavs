@@ -62,10 +62,27 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Starting comprehensive security scan..."
-          yavs scan . --all \
+          echo "🔍 Starting comprehensive security scan with all features..."
+          yavs scan . \
+            --auto \
+            --all \
+            --blame \
+            --baseline .yavs-baseline.yaml \
+            --policy examples/policies/security-policy.yaml \
+            --policy-mode enforce \
+            --fail-on HIGH \
+            --csv comprehensive-scan-output/findings.csv \
+            --tsv comprehensive-scan-output/findings.tsv \
             --continue-on-error \
             --output-dir comprehensive-scan-output
+
+          echo "✨ Features demonstrated:"
+          echo "  ✓ Auto-detect mode (--auto)"
+          echo "  ✓ Git blame tracking (--blame)"
+          echo "  ✓ Baseline with expiration (--baseline)"
+          echo "  ✓ Policy enforcement (--policy + --policy-mode enforce)"
+          echo "  ✓ CSV/TSV export (--csv, --tsv)"
+          echo "  ✓ IaC scanners (Terrascan, TemplateAnalyzer auto-detected)"
         continue-on-error: true
 
       - name: Generate all YAVS outputs

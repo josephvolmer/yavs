@@ -52,13 +52,20 @@ jobs:
       - name: Scan src/ directory (Current)
         run: |
           yavs scan src/ \
+            --auto \
             --all \
+            --blame \
+            --baseline .yavs-baseline.yaml \
+            --policy src/yavs/policy/builtins/security.yaml \
+            --policy-mode audit \
+            --csv current-scan/findings.csv \
             --no-ai \
             --continue-on-error \
             --output-dir current-scan \
             --quiet
 
           echo "✓ Current scan complete"
+          echo "✓ Features used: auto-detect, git-blame, baseline, policy, CSV export"
 
       - name: Compare with baseline using diff
         id: diff

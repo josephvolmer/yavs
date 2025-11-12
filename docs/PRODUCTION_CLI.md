@@ -190,9 +190,197 @@ yavs diff baseline.json current.json | grep "New findings"
 
 ---
 
+## Tool Version Management
+
+### 8. Scanner Version Control (`yavs tools`) ✅ IMPLEMENTED
+**Priority: HIGH**
+
+YAVS provides comprehensive tool version management for reproducible builds and safe upgrades in CI/CD pipelines.
+
+**Tested Versions (Nov 2025):**
+- Trivy: 0.67.2
+- Semgrep: 1.142.1
+- Bandit: 1.8.6
+- Checkov: 3.2.492
+
+#### Install Specific Versions
+
+```bash
+# Install all tools (tested versions)
+yavs tools install
+
+# Install specific tool
+yavs tools install --tool trivy
+yavs tools install --tool semgrep
+
+# Install exact version
+yavs tools install --tool trivy --version 0.67.2
+yavs tools install --tool semgrep --version 1.142.1
+```
+
+#### Check and Validate Versions
+
+```bash
+# List installed tool versions
+yavs tools status
+
+# Validate version compatibility
+yavs tools check
+```
+
+**Output Example:**
+```
+Tool Version Check
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+trivy      0.67.2    ✓ Tested version
+semgrep    1.142.1   ✓ Tested version
+bandit     1.8.6     ✓ Tested version
+checkov    3.2.492   ✓ Tested version
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All tools are compatible with YAVS
+```
+
+#### Upgrade Tools
+
+```bash
+# Upgrade all tools (tested versions)
+yavs tools upgrade
+
+# Upgrade specific tool
+yavs tools upgrade --tool trivy
+yavs tools upgrade --tool semgrep
+
+# Upgrade to absolute latest (may be untested)
+yavs tools upgrade --latest
+yavs tools upgrade --tool trivy --latest
+
+# Skip confirmation
+yavs tools upgrade -y
+```
+
+#### Pin Versions (Reproducible Builds)
+
+```bash
+# Create lock file (.yavs-tools.lock in YAML format)
+yavs tools pin
+
+# Create pip requirements file
+yavs tools pin --format requirements
+
+# Custom output path
+yavs tools pin -o my-tools.lock
+yavs tools pin --format requirements -o requirements-scanners.txt
+```
+
+**Lock File Example (`.yavs-tools.lock`):**
+```yaml
+version: "1.0"
+generated_at: "2025-11-12T10:30:00Z"
+tools:
+  trivy:
+    version: "0.67.2"
+    tested: true
+    path: "/Users/user/.yavs/bin/trivy"
+  semgrep:
+    version: "1.142.1"
+    tested: true
+  bandit:
+    version: "1.8.6"
+    tested: true
+  checkov:
+    version: "3.2.492"
+    tested: true
+```
+
+#### CI/CD Best Practices
+
+**1. Lock versions for reproducibility:**
+```yaml
+# GitHub Actions example
+- name: Install YAVS with locked versions
+  run: |
+    pip install yavs
+    yavs tools install
+    yavs tools pin  # Generate lock file
+    git add .yavs-tools.lock
+    git commit -m "Lock scanner versions"
+```
+
+**2. Validate versions before scanning:**
+```yaml
+- name: Validate scanner versions
+  run: |
+    yavs tools status
+    yavs tools check
+```
+
+**3. Use tested versions in production:**
+```yaml
+- name: Install tested versions
+  run: |
+    yavs tools install  # Installs tested versions by default
+```
+
+**4. Upgrade with caution:**
+```bash
+# Test upgrades in development first
+yavs tools upgrade --tool semgrep
+yavs tools check
+
+# Only use --latest after validation
+yavs tools upgrade --latest  # Use cautiously
+```
+
+#### Version Control Mechanisms
+
+YAVS supports multiple version control approaches:
+
+1. **Lock Files** (Recommended for CI/CD)
+   - `.yavs-tools.lock` - YAML format with full metadata
+   - `requirements-scanners.txt` - pip format for Python tools
+
+2. **Configuration Files**
+   ```yaml
+   # .yavs-config.yaml
+   tool_versions:
+     trivy: "0.67.2"
+     semgrep: "1.142.1"
+     bandit: "1.8.6"
+     checkov: "3.2.492"
+   ```
+
+3. **Environment Variables**
+   ```bash
+   export TRIVY_VERSION=0.67.2
+   export SEMGREP_VERSION=1.142.1
+   export BANDIT_VERSION=1.8.6
+   export CHECKOV_VERSION=3.2.492
+   ```
+
+4. **Direct Installation**
+   ```bash
+   yavs tools install --tool trivy --version 0.67.2
+   ```
+
+#### Automatic Version Validation
+
+YAVS automatically validates scanner versions during scans:
+
+```
+⚠ Warning: semgrep version 1.150.0 is outside tested range (1.142.1-1.142.999)
+  Scan will continue but results may vary. Consider running 'yavs tools upgrade'
+```
+
+**Non-Blocking Behavior:**
+- Version warnings are logged but don't fail scans
+- Results are still generated with potentially incompatible versions
+- Use `yavs tools check` to validate before scanning
+
+---
+
 ## Additional Features
 
-### 8. Continuous Monitoring Integration ⏳ PENDING
+### 9. Continuous Monitoring Integration ⏳ PENDING
 **Priority: MEDIUM**
 
 Webhook/API integration for CI/CD.
@@ -224,6 +412,7 @@ yavs scan --all --export prometheus
 | Statistics | ✅ Complete | MEDIUM | Multiple grouping options |
 | **Baseline/Allowlist** | ✅ Complete | MEDIUM | `--baseline` + `yavs ignore` commands |
 | **Dependency Diff** | ✅ Complete | LOW | `yavs diff` command |
+| **Tool Version Management** | ✅ Complete | HIGH | `yavs tools` commands with version control |
 | Webhook Integration | ⏳ Pending | MEDIUM | Planned for future release |
 
 ---
@@ -233,6 +422,7 @@ yavs scan --all --export prometheus
 This document tracks the production CLI features and their implementation status. As of v1.0.0:
 - **Baseline management** is fully implemented with `--baseline` flag and `yavs ignore` commands
 - **Diff functionality** is fully implemented with `yavs diff` command
+- **Tool version management** is fully implemented with `yavs tools` commands for install/upgrade/pin/check
 - **Webhook integration** remains the only pending feature
 
 For complete usage documentation, see the main README.md or run `yavs man`.

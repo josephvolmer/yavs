@@ -1,0 +1,67 @@
+version: "1.0"
+name: "Team Exceptions"
+description: "Team-specific policy overrides and exceptions"
+
+settings:
+  team: "backend-team"
+  contact: "backend-team@company.com"
+
+rules:
+  - id: "TEAM-001"
+    name: "Suppress legacy code findings"
+    description: "Legacy modules under active refactoring"
+    enabled: true
+    conditions:
+      - field: "file"
+        operator: "contains"
+        value: "/legacy/"
+        case_sensitive: false
+    action: "suppress"
+    reason: "Legacy code scheduled for refactoring Q2 2025"
+    owner: "backend-team@company.com"
+
+  - id: "TEAM-002"
+    name: "Allow specific vendor dependencies"
+    description: "Approved vendor libraries with known issues"
+    enabled: true
+    conditions:
+      - field: "package"
+        operator: "in"
+        value: ["vendor-lib-1", "vendor-lib-2"]
+    action: "suppress"
+    reason: "Vendor libraries approved by security team - mitigations in place"
+
+  - id: "TEAM-003"
+    name: "Escalate findings in critical path"
+    description: "Payment processing code requires higher scrutiny"
+    enabled: true
+    conditions:
+      - field: "file"
+        operator: "regex"
+        value: "/(payment|billing|checkout)/"
+        case_sensitive: false
+    severity_override: "CRITICAL"
+    action: "tag"
+    tags: ["critical-path", "payment", "requires-review"]
+
+  - id: "TEAM-004"
+    name: "Suppress test utilities"
+    description: "Test helpers and mock data excluded"
+    enabled: true
+    conditions:
+      - field: "file"
+        operator: "regex"
+        value: "/(tests?|__tests__|spec|mock)/"
+    action: "suppress"
+    reason: "Test code excluded from security scans"
+
+  - id: "TEAM-005"
+    name: "Tag findings by author team"
+    description: "Auto-tag findings for team ownership"
+    enabled: true
+    conditions:
+      - field: "git_blame.email"
+        operator: "regex"
+        value: "@backend-team\\.company\\.com$"
+    action: "tag"
+    tags: ["backend-team", "team-owned"]

@@ -34,12 +34,29 @@ comprehensive-security-scan:
     - yavs tools status
 
   script:
-    # Run comprehensive security scan
-    - echo "🔍 Starting comprehensive security scan..."
+    # Run comprehensive security scan with all features
+    - echo "🔍 Starting comprehensive security scan with all features..."
     - |
-      yavs scan . --all \
+      yavs scan . \
+        --auto \
+        --all \
+        --blame \
+        --baseline .yavs-baseline.yaml \
+        --policy examples/policies/security-policy.yaml \
+        --policy-mode enforce \
+        --fail-on HIGH \
+        --csv ${YAVS_OUTPUT_DIR}/findings.csv \
+        --tsv ${YAVS_OUTPUT_DIR}/findings.tsv \
         --continue-on-error \
         --output-dir ${YAVS_OUTPUT_DIR} || true
+
+    - echo "✨ Features demonstrated:"
+    - echo "  ✓ Auto-detect mode (--auto)"
+    - echo "  ✓ Git blame tracking (--blame)"
+    - echo "  ✓ Baseline with expiration (--baseline)"
+    - echo "  ✓ Policy enforcement (--policy + --policy-mode enforce)"
+    - echo "  ✓ CSV/TSV export (--csv, --tsv)"
+    - echo "  ✓ IaC scanners (Terrascan, TemplateAnalyzer auto-detected)"
 
     # Generate all YAVS outputs
     - echo "📊 Generating reports and statistics..."

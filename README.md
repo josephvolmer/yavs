@@ -68,6 +68,9 @@ YAVS is a **next-generation vulnerability scanner** that unifies industry-leadin
 - **🎯 Ignore Patterns** — Filter findings with regex patterns to reduce noise
 - **📊 Statistics** — Instant scan statistics and metrics via `yavs stats`
 - **🔕 Baseline Management** — Suppress false positives with `yavs ignore` commands
+- **⏰ Baseline Expiration** — Time-bound suppressions for tech debt management with `--expires`
+- **🚀 Auto-Detection** — Intelligent project type detection with `--auto` flag
+- **📄 CSV/TSV Export** — Spreadsheet-friendly formats with `--csv` and `--tsv` flags
 
 ### 🤖 AI-Enhanced Analysis
 
@@ -179,6 +182,15 @@ yavs summarize results.json
 ### Advanced Usage
 
 ```bash
+# Auto-detect project type and scan appropriately
+yavs scan --auto
+
+# Export to CSV for spreadsheet analysis
+yavs scan --all --csv findings.csv
+
+# Export to TSV (Tab-Separated Values)
+yavs scan --all --tsv findings.tsv
+
 # Scan multiple directories
 yavs scan /path/dir1 /path/dir2 /path/dir3 --all
 
@@ -196,6 +208,12 @@ yavs scan --all --ignore "test/" --ignore ".*_test\\.py$"
 
 # Use structured output format (organized by category)
 yavs scan --all --structured -o ./results
+
+# Suppress finding with expiration date (tech debt tracking)
+yavs ignore add CVE-2023-1234 --reason "Fix planned for Q2" --expires 2025-06-30 --owner john
+
+# List suppressions with details
+yavs ignore list --details
 ```
 
 ### Example Output
@@ -263,6 +281,67 @@ The setup command:
 - ✅ Verifies all scanner installations (Trivy, Semgrep, Checkov, Bandit, BinSkim)
 - ✅ Shows installation instructions for missing scanners
 - ✅ Works on macOS, Linux, and Windows
+
+#### Tool Version Management
+
+YAVS ships with tested scanner versions and provides flexible version control for reproducible builds and safe upgrades.
+
+**Tested Versions (Nov 2025):**
+- Trivy: 0.67.2
+- Semgrep: 1.142.1
+- Bandit: 1.8.6
+- Checkov: 3.2.492
+
+```bash
+# Check installed tool versions and compatibility
+yavs tools status              # List all installed tools
+yavs tools check               # Validate version compatibility
+
+# Install specific tool or version
+yavs tools install --tool trivy                     # Install/reinstall specific tool
+yavs tools install --tool trivy --version 0.67.2    # Install exact version
+yavs tools install --tool semgrep --version 1.142.1 # Install specific Semgrep version
+
+# Upgrade to tested versions (safe)
+yavs tools upgrade              # Upgrade all tools (tested versions)
+yavs tools upgrade --tool trivy # Upgrade specific tool
+
+# Upgrade to absolute latest (may be untested)
+yavs tools upgrade --latest              # Upgrade all to latest
+yavs tools upgrade --tool semgrep --latest  # Upgrade specific tool to latest
+
+# Lock versions for reproducibility
+yavs tools pin                              # Create .yavs-tools.lock (YAML)
+yavs tools pin --format requirements        # Create requirements-scanners.txt
+yavs tools pin -o my-tools.lock             # Custom output path
+```
+
+**Version Control Mechanisms:**
+
+1. **Lock Files**: Pin exact versions for reproducible builds
+   - `.yavs-tools.lock` (YAML format, includes all tools + Trivy)
+   - `requirements-scanners.txt` (pip format, Python tools only)
+
+2. **Configuration**: Set preferred versions in `.yavs-config.yaml`
+   ```yaml
+   tool_versions:
+     trivy: "0.67.2"
+     semgrep: "1.142.1"
+   ```
+
+3. **Environment Variables**: Override at runtime
+   ```bash
+   export TRIVY_VERSION=0.67.2
+   export SEMGREP_VERSION=1.142.1
+   ```
+
+**Best Practices:**
+
+- 🎯 **Use tested versions**: Default `yavs tools install` installs tested versions
+- 🔒 **Lock versions in CI/CD**: Commit `.yavs-tools.lock` for reproducibility
+- ⚠️ **Test before upgrading**: Use `--latest` flag cautiously in production
+- ✅ **Validate compatibility**: Run `yavs tools check` after upgrades
+- 📌 **Pin for consistency**: Lock versions across team with `yavs tools pin`
 
 #### `yavs scan` - Run Security Scan
 

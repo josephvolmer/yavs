@@ -203,6 +203,27 @@ class SARIFConverter(LoggerMixin):
         if finding.get("metadata"):
             properties["metadata"] = finding["metadata"]
 
+        # Add git blame information
+        if finding.get("git_blame"):
+            properties["git_blame"] = finding["git_blame"]
+
+        # Add policy information
+        if finding.get("suppressed_by_policy"):
+            properties["policy_suppressed"] = True
+            properties["policy_reason"] = finding.get("suppression_reason", "")
+        if finding.get("policy_tags"):
+            properties["policy_tags"] = finding["policy_tags"]
+        if finding.get("policy_rule"):
+            properties["policy_rule"] = finding["policy_rule"]
+        if finding.get("policy_violation"):
+            properties["policy_violation"] = True
+
+        # Add baseline suppression
+        if finding.get("suppressed"):
+            properties["suppressed"] = True
+            if finding.get("suppression_reason"):
+                properties["suppression_reason"] = finding["suppression_reason"]
+
         result["properties"] = properties
 
         return result

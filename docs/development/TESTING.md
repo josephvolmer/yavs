@@ -70,7 +70,7 @@ make test-combinations
 - Ignore pattern filtering
 - Edge cases
 
-**Documentation:** See `tests/COMBINATION_TESTS.md` for detailed test matrix.
+**Documentation:** See [COMBINATION_TESTS.md](COMBINATION_TESTS.md) for detailed test matrix.
 
 ### All Tests
 
@@ -473,6 +473,6 @@ All scanners:     ~17 findings
 - ✅ **41 test combinations** - comprehensive coverage
 - ✅ **6 language fixtures** - Python, Node.js, Java, Go, K8s, Docker
 - ✅ **Multiple test levels** - unit tests, integration, combination
-- ✅ **Clear documentation** - this guide + `tests/COMBINATION_TESTS.md`
+- ✅ **Clear documentation** - this guide + [COMBINATION_TESTS.md](COMBINATION_TESTS.md)
 
-For more details on specific test scenarios, see `tests/COMBINATION_TESTS.md`.
+For more details on specific test scenarios, see [COMBINATION_TESTS.md](COMBINATION_TESTS.md).

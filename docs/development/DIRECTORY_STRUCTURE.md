@@ -121,8 +121,6 @@ src/
 ```
 tests/
 ├── __init__.py
-├── TEST_GUIDE.md                  # Testing guide
-├── COMBINATION_TESTS.md           # Combination test docs
 ├── test_all_combinations.sh       # Test script
 ├── fixtures/                      # Test fixtures
 │   ├── README.md

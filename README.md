@@ -814,7 +814,7 @@ make test-combinations
 - Ignore pattern filtering
 - Edge cases and special scenarios
 
-Results are saved to `artifacts/` with detailed reports. See `tests/COMBINATION_TESTS.md` for full documentation.
+Results are saved to `artifacts/` with detailed reports. See [docs/development/COMBINATION_TESTS.md](docs/development/COMBINATION_TESTS.md) for full documentation.
 
 ### Code Style
 
@@ -984,27 +984,3 @@ Get plain-English explanations and actionable remediation steps powered by Claud
   [⬆ Back to Top](#yavs)
 
 </div>
-
-```python
-security_data = {
-    "build_cycle": datetime.utcnow().isoformat() + "Z",
-    "project": "your-project-name",
-    "commit_hash": "abc123def",
-    "sbom": {
-        "format": "CycloneDX",
-        "location": "artifacts/sbom.json"
-    },
-    "compliance": {
-        "tool": "Checkov example",
-        "violations": [
-            {"policy": "no-GPL", "status": "fail", "details": "GPL license found in libfoo"}
-        ]
-    },
-    "sast": {
-        "tool": "Semgrep",
-        "issues": [
-            {"severity": "High", "description": "Hardcoded credentials", "file": "config.py"}
-        ]
-    }
-}
-```

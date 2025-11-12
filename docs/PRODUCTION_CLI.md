@@ -4,8 +4,8 @@
 This document outlines production-ready enhancements for YAVS CLI to support both CI/CD pipelines and interactive use.
 
 ## Implementation Status
-✅ **Implemented** - Exit Code Control, Severity Filtering, Quiet Mode, Scan Timeout, Continue on Error
-⏳ **Pending** - Baseline/Allowlist, Additional Commands
+✅ **Fully Implemented** - Exit Code Control, Severity Filtering, Quiet Mode, Scan Timeout, Continue on Error, Baseline/Allowlist, Diff Command
+⏳ **Pending** - Webhook Integration
 
 ## Critical Features for CI/CD Pipelines
 
@@ -74,7 +74,7 @@ Overall scan timeout (in seconds).
 yavs scan --all --timeout 600
 ```
 
-**Note:** Uses signal-based timeout on Unix/Linux/Mac. Not supported on Windows.
+**Note:** Uses signal-based timeout on Unix/Linux/Mac. Windows support pending (see KNOWN_ISSUES.md).
 
 ### 5. Continue on Error (`--continue-on-error`) ✅ IMPLEMENTED
 **Priority: MEDIUM**
@@ -90,6 +90,55 @@ yavs scan --all --continue-on-error
 - Partial results still generated
 - Exit code based on findings from successful scanners
 
+### 6. Baseline/Allowlist (`--baseline`) ✅ IMPLEMENTED
+**Priority: MEDIUM**
+
+Suppress known/accepted vulnerabilities using baseline files.
+
+```bash
+# Use baseline file to suppress known issues
+yavs scan --all --baseline .yavs-baseline.yaml
+
+# Baseline management commands
+yavs ignore add CVE-2023-1234 -r "False positive"
+yavs ignore remove CVE-2023-1234
+yavs ignore list
+yavs ignore export results.json -o baseline.yaml
+```
+
+**Baseline File Format (YAML):**
+```yaml
+version: 1.0
+description: YAVS suppression baseline
+suppressions:
+  - id: CVE-2023-1234
+    reason: False positive
+    date: 2024-01-15
+```
+
+### 7. Dependency Diff (`yavs diff`) ✅ IMPLEMENTED
+**Priority: LOW**
+
+Compare two scan results to see what changed.
+
+```bash
+# Compare current scan to previous
+yavs diff baseline.json current.json
+
+# Show all findings (new, fixed, existing)
+yavs diff baseline.json current.json --show-all
+
+# Save comparison report
+yavs diff baseline.json current.json -o comparison.json
+```
+
+**Output:**
+- New findings (appeared in current scan)
+- Fixed findings (were in baseline, now gone)
+- Existing findings (in both scans)
+
+---
+
 ## Real-World CI/CD Examples
 
 ### GitHub Actions / GitLab CI / Jenkins
@@ -101,6 +150,7 @@ yavs scan --all --continue-on-error
       --quiet \
       --fail-on HIGH \
       --continue-on-error \
+      --baseline .yavs-baseline.yaml \
       --output-dir ./security-results
 ```
 
@@ -111,6 +161,7 @@ yavs scan --all \
   --fail-on CRITICAL \
   --quiet \
   --timeout 600 \
+  --baseline .yavs-baseline.yaml \
   --output-dir ./artifacts
 ```
 
@@ -122,48 +173,24 @@ yavs scan --all \
   --output-dir ./dev-scan
 ```
 
-### Combined with Severity Filtering
+### Baseline Tracking Workflow
 ```bash
-# Only review CRITICAL findings but don't fail the build
-yavs scan --all \
-  --severity CRITICAL \
-  --fail-on NONE \
-  --quiet
+# First run - create baseline
+yavs scan --all -o baseline.json
+git add baseline.json
+git commit -m "Add security baseline"
 
-# Review CRITICAL and HIGH, fail on CRITICAL only
-yavs scan --all \
-  --severity CRITICAL,HIGH \
-  --fail-on CRITICAL \
-  --continue-on-error
+# Future runs - compare against baseline
+yavs scan --all -o current.json
+yavs diff baseline.json current.json
+
+# Show only new findings
+yavs diff baseline.json current.json | grep "New findings"
 ```
 
-## Additional Features (Pending Implementation)
+---
 
-### 6. Baseline/Allowlist (`--baseline`) ⏳ PENDING
-**Priority: MEDIUM**
-
-Suppress known/accepted vulnerabilities.
-
-```bash
-# Use baseline file to suppress known issues
-yavs scan --all --baseline .yavs-baseline.json
-
-# Generate baseline from current scan
-yavs scan --all --generate-baseline
-```
-
-### 7. Dependency Diff (`yavs diff`) ⏳ PENDING
-**Priority: LOW**
-
-Compare two scan results to see what changed.
-
-```bash
-# Compare current scan to previous
-yavs diff baseline-scan.json current-scan.json
-
-# Show only new vulnerabilities
-yavs diff --new-only previous.json current.json
-```
+## Additional Features
 
 ### 8. Continuous Monitoring Integration ⏳ PENDING
 **Priority: MEDIUM**
@@ -171,31 +198,41 @@ yavs diff --new-only previous.json current.json
 Webhook/API integration for CI/CD.
 
 ```bash
-# Post results to webhook
+# Post results to webhook (planned)
 yavs scan --all --webhook https://your-endpoint.com/security
 
-# Export to monitoring tools
+# Export to monitoring tools (planned)
 yavs scan --all --export prometheus
 ```
 
 ---
 
-## Implementation Status
+## Implementation Status Table
 
 | Feature | Status | Priority | Notes |
 |---------|--------|----------|-------|
+| Exit Code Control | ✅ Complete | CRITICAL | `--fail-on` flag |
+| Severity Filtering | ✅ Complete | HIGH | `--severity` flag |
+| Quiet Mode | ✅ Complete | HIGH | `--quiet` flag |
+| Scan Timeout | ✅ Complete | MEDIUM | Unix/Linux/Mac only |
+| Continue on Error | ✅ Complete | MEDIUM | `--continue-on-error` flag |
 | Core Scanning | ✅ Complete | CRITICAL | All scanners integrated |
-| Output Formats | ✅ Complete | CRITICAL | JSON, SARIF, HTML |
+| Output Formats | ✅ Complete | CRITICAL | JSON, SARIF, HTML, SBOM |
 | AI Integration | ✅ Complete | HIGH | Multi-provider support |
 | SBOM Generation | ✅ Complete | HIGH | CycloneDX format |
 | Ignore Patterns | ✅ Complete | MEDIUM | Regex and glob support |
 | Statistics | ✅ Complete | MEDIUM | Multiple grouping options |
-| Baseline/Allowlist | ⏳ Pending | MEDIUM | Planned for future release |
-| Dependency Diff | ⏳ Pending | LOW | Planned for future release |
+| **Baseline/Allowlist** | ✅ Complete | MEDIUM | `--baseline` + `yavs ignore` commands |
+| **Dependency Diff** | ✅ Complete | LOW | `yavs diff` command |
 | Webhook Integration | ⏳ Pending | MEDIUM | Planned for future release |
 
 ---
 
 ## Notes
 
-This document tracks the production CLI features and their implementation status. Features marked as **⏳ PENDING** are planned but not yet implemented. Refer to the main README.md for complete documentation of available features.
+This document tracks the production CLI features and their implementation status. As of v1.0.0:
+- **Baseline management** is fully implemented with `--baseline` flag and `yavs ignore` commands
+- **Diff functionality** is fully implemented with `yavs diff` command
+- **Webhook integration** remains the only pending feature
+
+For complete usage documentation, see the main README.md or run `yavs man`.

@@ -56,6 +56,6 @@ rules:
     conditions:
       - field: "file"
         operator: "regex"
-        value: "/(vendor|node_modules|venv|\.venv)/"
+        value: "/(vendor|node_modules|venv|\\.venv)/"
     action: "suppress"
     reason: "Third-party code excluded by policy"

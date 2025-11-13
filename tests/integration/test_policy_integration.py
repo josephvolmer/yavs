@@ -109,6 +109,7 @@ pyyaml==5.3.1
             "--policy", str(policy_file),
             "--policy-mode", "audit",
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -143,6 +144,7 @@ pyyaml==5.3.1
             "--policy", str(policy_file),
             "--policy-mode", "audit",
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -194,6 +196,7 @@ pyyaml==5.3.1
             "--policy", str(fail_policy),
             "--policy-mode", "enforce",
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -233,6 +236,7 @@ pyyaml==5.3.1
             "--policy", str(strict_policy),
             "--policy-mode", "audit",  # Audit mode - should not fail
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -252,6 +256,7 @@ pyyaml==5.3.1
             "--policy-mode", "audit",
             "--csv", str(output_dir / "findings.csv"),
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -279,6 +284,7 @@ pyyaml==5.3.1
             "--policy", str(policy_file),
             "--policy-mode", "audit",
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 
@@ -350,6 +356,7 @@ pyyaml==5.3.1
             "--policy", str(policy2),
             "--policy-mode", "audit",
             "--no-ai",
+            "--flat",
             "--output-dir", str(output_dir)
         ])
 

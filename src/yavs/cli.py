@@ -1112,6 +1112,9 @@ def scan(
                         console.print(f"  ... and {len(violations) - 5} more")
                     raise typer.Exit(1)
 
+            except typer.Exit:
+                # Re-raise Exit exceptions (from policy violations)
+                raise
             except Exception as e:
                 console.print(f"[red]✗ Policy evaluation failed: {str(e)}[/red]")
                 if policy_mode == "enforce":

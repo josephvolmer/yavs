@@ -30,9 +30,9 @@ class TestScanCommand:
         assert result.exit_code == 0
         assert "Scan filesystem and/or Docker images" in result.stdout
 
-    @patch('src.yavs.cli.TrivyScanner')
-    @patch('src.yavs.cli.SemgrepScanner')
-    @patch('src.yavs.cli.BanditScanner')
+    @patch('yavs.cli.TrivyScanner')
+    @patch('yavs.cli.SemgrepScanner')
+    @patch('yavs.cli.BanditScanner')
     def test_scan_all_flag(self, mock_bandit, mock_semgrep, mock_trivy, tmp_path):
         """Test --all flag runs all scanners."""
         # Mock scanners to return empty findings
@@ -69,7 +69,7 @@ class TestScanCommand:
         # verifies the command runs without crashing
         assert isinstance(result.exit_code, int)
 
-    @patch('src.yavs.cli.SemgrepScanner')
+    @patch('yavs.cli.SemgrepScanner')
     def test_scan_sast_flag(self, mock_semgrep, tmp_path):
         """Test --sast flag."""
         mock_instance = Mock()
@@ -96,7 +96,7 @@ class TestScanCommand:
         output_dir = tmp_path / "custom_output"
 
         # Mock to avoid actual scanning
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -117,7 +117,7 @@ class TestScanCommand:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -139,7 +139,7 @@ class TestScanCommand:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -166,7 +166,7 @@ class TestBaselineFeatures:
         target_dir.mkdir()
         baseline_file = tmp_path / "baseline.json"
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = [
                 {
@@ -210,7 +210,7 @@ class TestBaselineFeatures:
         with open(baseline_file, 'w') as f:
             json.dump(baseline_data, f)
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -236,7 +236,7 @@ class TestProductionFeatures:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = [
                 {
@@ -270,7 +270,7 @@ class TestProductionFeatures:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             # Return findings of different severities
             mock_instance.run.return_value = [
@@ -297,7 +297,7 @@ class TestProductionFeatures:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -318,7 +318,7 @@ class TestProductionFeatures:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.side_effect = Exception("Scanner failed")
             mock_instance.check_available.return_value = True
@@ -396,7 +396,7 @@ class TestIgnorePatterns:
         target_dir = tmp_path / "test_project"
         target_dir.mkdir()
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -462,7 +462,7 @@ class TestSetupCommand:
         assert result.exit_code == 0
         assert "install" in result.stdout.lower()
 
-    @patch('src.yavs.cli.scanner_installer')
+    @patch('yavs.cli.scanner_installer')
     def test_setup_basic(self, mock_installer):
         """Test basic setup command."""
         result = runner.invoke(app, ["setup"])
@@ -556,7 +556,7 @@ class TestConfigFile:
             import yaml
             yaml.dump(config_data, f)
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True
@@ -575,7 +575,7 @@ class TestConfigFile:
 class TestDockerImageScanning:
     """Tests for Docker image scanning features."""
 
-    @patch('src.yavs.cli.TrivyScanner')
+    @patch('yavs.cli.TrivyScanner')
     def test_scan_single_image(self, mock_trivy):
         """Test scanning a single Docker image."""
         mock_instance = Mock()
@@ -592,7 +592,7 @@ class TestDockerImageScanning:
         # Should attempt to scan image
         assert mock_trivy.called
 
-    @patch('src.yavs.cli.TrivyScanner')
+    @patch('yavs.cli.TrivyScanner')
     def test_scan_multiple_images(self, mock_trivy):
         """Test scanning multiple Docker images."""
         mock_instance = Mock()
@@ -615,7 +615,7 @@ class TestDockerImageScanning:
         images_file = tmp_path / "images.txt"
         images_file.write_text("nginx:latest\npython:3.11\n")
 
-        with patch('src.yavs.cli.TrivyScanner') as mock_trivy:
+        with patch('yavs.cli.TrivyScanner') as mock_trivy:
             mock_instance = Mock()
             mock_instance.run.return_value = []
             mock_instance.check_available.return_value = True

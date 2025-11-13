@@ -27,15 +27,17 @@ class TestConfigureLogging:
     def test_configure_logging_with_config(self):
         """Test configure_logging with config dict."""
         config = {
-            "level": "INFO",
-            "file": None
+            "logging": {
+                "level": "INFO",
+                "file": None
+            }
         }
         configure_logging(config)
         # Should not raise
 
     def test_configure_logging_idempotent(self):
         """Test configure_logging can be called multiple times."""
-        config = {"level": "INFO"}
+        config = {"logging": {"level": "INFO"}}
         configure_logging(config)
         configure_logging(config)
         # Should not raise

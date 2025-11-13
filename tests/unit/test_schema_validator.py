@@ -7,7 +7,7 @@ from pathlib import Path
 
 from yavs.utils.schema_validator import (
     validate_sarif_structure,
-    validate_finding_schema
+    validate_sarif
 )
 
 
@@ -184,103 +184,43 @@ class TestValidateSARIFStructure:
         assert is_valid is False
 
 
-class TestValidateFindingSchema:
-    """Test finding schema validation."""
+class TestValidateSARIFFile:
+    """Test validate_sarif function."""
 
-    def test_valid_minimal_finding(self):
-        """Test validation of minimal valid finding."""
-        finding = {
-            "tool": "trivy",
-            "severity": "HIGH",
-            "message": "CVE-2021-1234"
+    def test_nonexistent_file(self, tmp_path):
+        """Test nonexistent file fails."""
+        fake_path = tmp_path / "nonexistent.sarif"
+        is_valid, message = validate_sarif(fake_path)
+        assert is_valid is False
+        assert "not found" in message.lower()
+
+    def test_invalid_json(self, tmp_path):
+        """Test invalid JSON fails."""
+        sarif_file = tmp_path / "invalid.sarif"
+        sarif_file.write_text("{invalid json")
+        is_valid, message = validate_sarif(sarif_file)
+        assert is_valid is False
+
+    def test_valid_sarif_file(self, tmp_path):
+        """Test valid SARIF file."""
+        sarif_data = {
+            "version": "2.1.0",
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "YAVS"
+                        }
+                    },
+                    "results": []
+                }
+            ]
         }
-        is_valid, message = validate_finding_schema(finding)
+        sarif_file = tmp_path / "valid.sarif"
+        sarif_file.write_text(json.dumps(sarif_data))
+        is_valid, message = validate_sarif(sarif_file)
         assert is_valid is True
-
-    def test_valid_complete_finding(self):
-        """Test validation of complete finding."""
-        finding = {
-            "tool": "semgrep",
-            "category": "sast",
-            "severity": "HIGH",
-            "file": "src/app.py",
-            "line": 42,
-            "message": "SQL injection vulnerability",
-            "rule_id": "python.lang.security.sqli",
-            "description": "Detected SQL injection",
-            "remediation": "Use parameterized queries"
-        }
-        is_valid, message = validate_finding_schema(finding)
-        assert is_valid is True
-
-    def test_missing_tool(self):
-        """Test finding missing tool fails."""
-        finding = {
-            "severity": "HIGH",
-            "message": "Test"
-        }
-        is_valid, message = validate_finding_schema(finding)
-        assert is_valid is False
-        assert "tool" in message.lower()
-
-    def test_missing_severity(self):
-        """Test finding missing severity fails."""
-        finding = {
-            "tool": "trivy",
-            "message": "Test"
-        }
-        is_valid, message = validate_finding_schema(finding)
-        assert is_valid is False
-        assert "severity" in message.lower()
-
-    def test_missing_message(self):
-        """Test finding missing message fails."""
-        finding = {
-            "tool": "trivy",
-            "severity": "HIGH"
-        }
-        is_valid, message = validate_finding_schema(finding)
-        assert is_valid is False
-        assert "message" in message.lower()
-
-    def test_invalid_severity(self):
-        """Test finding with invalid severity fails."""
-        finding = {
-            "tool": "trivy",
-            "severity": "INVALID",
-            "message": "Test"
-        }
-        is_valid, message = validate_finding_schema(finding)
-        assert is_valid is False
-        assert "severity" in message.lower()
-
-    def test_valid_severity_levels(self):
-        """Test all valid severity levels."""
-        severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
-        for sev in severities:
-            finding = {
-                "tool": "test",
-                "severity": sev,
-                "message": "Test"
-            }
-            is_valid, message = validate_finding_schema(finding)
-            assert is_valid is True, f"Severity {sev} should be valid"
-
-    def test_not_dict(self):
-        """Test non-dict input fails."""
-        is_valid, message = validate_finding_schema([])
-        assert is_valid is False
-        assert "dictionary" in message.lower()
-
-    def test_none_input(self):
-        """Test None input fails."""
-        is_valid, message = validate_finding_schema(None)
-        assert is_valid is False
-
-    def test_empty_dict(self):
-        """Test empty dict fails."""
-        is_valid, message = validate_finding_schema({})
-        assert is_valid is False
 
 
 if __name__ == "__main__":

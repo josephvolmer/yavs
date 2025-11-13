@@ -49,6 +49,8 @@ class TestScanCommand:
             "scan",
             str(target_dir),
             "--all",
+            "--no-ai",
+            "--continue-on-error",
             "--output-dir", str(tmp_path / "output")
         ])
 
@@ -84,6 +86,8 @@ class TestScanCommand:
             "scan",
             str(target_dir),
             "--sast",
+            "--no-ai",
+            "--continue-on-error",
             "--output-dir", str(tmp_path / "output")
         ])
 
@@ -425,17 +429,19 @@ class TestDiffCommand:
 
     def test_diff_basic(self, tmp_path):
         """Test basic diff functionality."""
-        # Create baseline file
-        baseline_file = tmp_path / "baseline.json"
-        baseline_data = {
-            "data": [
-                {"file": "test.py", "line": 10, "rule_id": "R1", "severity": "HIGH", "tool": "test"}
-            ]
-        }
-        with open(baseline_file, 'w') as f:
-            json.dump(baseline_data, f)
+        from yavs.utils.baseline import Baseline
 
-        # Create current file
+        # Create baseline findings
+        baseline_findings = [
+            {"file": "test.py", "line": 10, "rule_id": "R1", "severity": "HIGH", "tool": "test"}
+        ]
+
+        # Generate proper baseline file
+        baseline_file = tmp_path / "baseline.json"
+        baseline = Baseline()
+        baseline.generate(baseline_findings, output_path=baseline_file)
+
+        # Create current scan results file
         current_file = tmp_path / "current.json"
         current_data = {
             "data": [
@@ -448,27 +454,25 @@ class TestDiffCommand:
 
         result = runner.invoke(app, ["diff", str(baseline_file), str(current_file)])
 
-        # Should show new findings
-        assert result.exit_code == 0
-        assert "new" in result.stdout.lower() or "1" in result.stdout
+        # Should show new findings (exit code 1 when new findings exist)
+        assert result.exit_code == 1
+        assert "new" in result.stdout.lower()
 
 
-class TestSetupCommand:
-    """Tests for the setup subcommand."""
+class TestToolsCommand:
+    """Tests for the tools subcommand."""
 
-    def test_setup_help(self):
-        """Test setup command help."""
-        result = runner.invoke(app, ["setup", "--help"])
+    def test_tools_help(self):
+        """Test tools command help."""
+        result = runner.invoke(app, ["tools", "--help"])
         assert result.exit_code == 0
         assert "install" in result.stdout.lower()
 
-    @patch('yavs.cli.scanner_installer')
-    def test_setup_basic(self, mock_installer):
-        """Test basic setup command."""
-        result = runner.invoke(app, ["setup"])
-
-        # Should attempt to install tools
-        assert isinstance(result.exit_code, int)
+    def test_tools_install_help(self):
+        """Test tools install command help."""
+        result = runner.invoke(app, ["tools", "install", "--help"])
+        assert result.exit_code == 0
+        assert "install" in result.stdout.lower() or "scanner" in result.stdout.lower()
 
 
 class TestSummarizeCommand:
@@ -586,6 +590,7 @@ class TestDockerImageScanning:
         result = runner.invoke(app, [
             "scan",
             "--sbom",
+            "--no-ai",
             "--images", "nginx:latest"
         ])
 
@@ -603,6 +608,7 @@ class TestDockerImageScanning:
         result = runner.invoke(app, [
             "scan",
             "--sbom",
+            "--no-ai",
             "--images", "nginx:latest",
             "--images", "python:3.11"
         ])

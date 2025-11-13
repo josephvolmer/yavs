@@ -3621,6 +3621,9 @@ def diff(
         if comparison['new_count'] > 0:
             raise typer.Exit(1)
 
+    except typer.Exit:
+        # Re-raise Exit exceptions (from new findings detection)
+        raise
     except FileNotFoundError as e:
         console.print(f"[red]✗ File not found: {e}[/red]")
         raise typer.Exit(2)

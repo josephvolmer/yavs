@@ -116,7 +116,7 @@ pyyaml==5.3.1
         assert result.exit_code == 0
 
         # Load results
-        results_file = output_dir / "scan-results.json"
+        results_file = output_dir / "yavs-results.json"
         assert results_file.exists()
 
         with open(results_file) as f:
@@ -147,7 +147,7 @@ pyyaml==5.3.1
         ])
 
         # Load results
-        results_file = output_dir / "scan-results.json"
+        results_file = output_dir / "yavs-results.json"
         with open(results_file) as f:
             results = json.load(f)
 

@@ -42,15 +42,7 @@ jobs:
           pip install pytest pytest-cov pytest-xdist pytest-timeout
 
       - name: Run unit tests
-        run: |
-          pytest tests/unit/ \
-            -v \
-            --cov=src/yavs \
-            --cov-report=xml \
-            --cov-report=term \
-            --junitxml=junit/unit-test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml \
-            --timeout=30 \
-            -n auto
+        run: pytest tests/unit/ -v --cov=src/yavs --cov-report=xml --cov-report=term --junitxml=junit/unit-test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml --timeout=30 -n auto
         env:
           PYTHONPATH: ${{ github.workspace }}/src
 
@@ -118,15 +110,7 @@ jobs:
           safety --version || echo "Safety not available"
 
       - name: Run integration tests
-        run: |
-          pytest tests/integration/ \
-            -v \
-            --cov=src/yavs \
-            --cov-append \
-            --cov-report=xml \
-            --cov-report=term \
-            --junitxml=junit/integration-test-results-py${{ matrix.python-version }}.xml \
-            --timeout=120
+        run: pytest tests/integration/ -v --cov=src/yavs --cov-append --cov-report=xml --cov-report=term --junitxml=junit/integration-test-results-py${{ matrix.python-version }}.xml --timeout=120
         env:
           PYTHONPATH: ${{ github.workspace }}/src
 
@@ -232,16 +216,7 @@ jobs:
           sudo apt-get install -y trivy
 
       - name: Run all tests with coverage
-        run: |
-          pytest tests/ \
-            -v \
-            --cov=src/yavs \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term \
-            --junitxml=junit/all-test-results.xml \
-            --timeout=120 \
-            -n auto
+        run: pytest tests/ -v --cov=src/yavs --cov-report=xml --cov-report=html --cov-report=term --junitxml=junit/all-test-results.xml --timeout=120 -n auto
         env:
           PYTHONPATH: ${{ github.workspace }}/src
 

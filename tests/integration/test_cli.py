@@ -15,7 +15,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 from unittest.mock import Mock, patch, MagicMock
 
-from src.yavs.cli import app, filter_findings_by_ignore_patterns
+from yavs.cli import app, filter_findings_by_ignore_patterns
 
 
 runner = CliRunner()

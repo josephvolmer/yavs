@@ -16,7 +16,7 @@ class TestMultiLanguageScanning:
     @pytest.fixture
     def fixtures_dir(self):
         """Get fixtures directory."""
-        return Path(__file__).parent / "fixtures"
+        return Path(__file__).parent.parent / "fixtures"
 
     def test_python_project_scanning(self, fixtures_dir):
         """Test scanning Python project."""
@@ -207,7 +207,7 @@ class TestDockerImageScanning:
     @pytest.fixture
     def docker_fixtures_dir(self):
         """Get Docker fixtures directory."""
-        return Path(__file__).parent / "fixtures" / "docker_images"
+        return Path(__file__).parent.parent / "fixtures" / "docker_images"
 
     def test_dockerfile_structure(self, docker_fixtures_dir):
         """Test Dockerfile fixtures exist."""
@@ -271,7 +271,7 @@ class TestEndToEndMultiLanguage:
 
     def test_scan_all_fixtures(self):
         """Test scanning all language fixtures together."""
-        fixtures_dir = Path(__file__).parent / "fixtures"
+        fixtures_dir = Path(__file__).parent.parent / "fixtures"
 
         if not fixtures_dir.exists():
             pytest.skip("Fixtures directory not found")

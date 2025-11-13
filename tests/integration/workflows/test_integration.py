@@ -13,7 +13,7 @@ from yavs.utils.schema_validator import validate_sarif_structure
 @pytest.fixture
 def sample_project():
     """Path to sample vulnerable project."""
-    return Path(__file__).parent / "fixtures" / "sample_project"
+    return Path(__file__).parent.parent.parent / "fixtures" / "sample_project"
 
 
 @pytest.mark.integration

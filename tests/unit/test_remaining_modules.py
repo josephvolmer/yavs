@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from yavs.utils.baseline import FindingFingerprint, Baseline
-from yavs.utils.git_blame import get_git_blame, annotate_findings_with_blame
+from yavs.utils.git_blame import get_git_blame, enrich_findings_with_blame
 from yavs.scanners.template_analyzer import TemplateAnalyzerScanner
 from yavs.utils.rule_links import get_rule_documentation_url, add_documentation_links
 
@@ -86,14 +86,14 @@ class TestGitBlame:
         result = get_git_blame(test_file, 1)
         assert result is None
 
-    def test_annotate_findings_with_blame_empty(self):
-        """Test annotating empty findings list."""
-        result = annotate_findings_with_blame([], Path("."))
+    def test_enrich_findings_with_blame_empty(self):
+        """Test enriching empty findings list."""
+        result = enrich_findings_with_blame([], Path("."))
         assert result == []
 
     @patch('yavs.utils.git_blame.get_git_blame')
-    def test_annotate_findings_with_blame(self, mock_blame, tmp_path):
-        """Test annotating findings with git blame."""
+    def test_enrich_findings_with_blame(self, mock_blame, tmp_path):
+        """Test enriching findings with git blame."""
         mock_blame.return_value = {
             'author': 'Jane Doe',
             'email': 'jane@example.com',
@@ -104,7 +104,7 @@ class TestGitBlame:
             {'file': 'test.py', 'line': 10, 'severity': 'HIGH'}
         ]
 
-        result = annotate_findings_with_blame(findings, tmp_path)
+        result = enrich_findings_with_blame(findings, tmp_path)
         assert len(result) == 1
 
 
